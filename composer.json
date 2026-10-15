@@ -1,0 +1,44 @@
+{
+    "name": "pype/framework",
+    "description": "The pype core: a lightweight, pipeline-first PHP framework.",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.2",
+        "ext-pdo": "*",
+        "psr/container": "^2.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11"
+    },
+    "autoload": {
+        "psr-4": {
+            "Pype\\": "src/"
+        },
+        "files": [
+            "src/helpers.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Pype\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "0.1.x-dev"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "minimum-stability": "stable",
+    "homepage": "https://github.com/Valourite/pype-framework",
+    "keywords": [
+        "framework",
+        "pipeline",
+        "api",
+        "lightweight",
+        "json"
+    ]
+}
