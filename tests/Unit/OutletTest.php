@@ -76,7 +76,7 @@ final class OutletTest extends TestCase
 
         $res = $this->client->get('/u/ada');
 
-        $this->assertSame('text/html; charset=utf-8', $res->response()->outlet()?->contentType());
+        $this->assertSame('text/html; charset=utf-8', $res->header('Content-Type'));
         $this->assertSame('<p>ADA! (3)</p>', trim($res->body()));
     }
 }

@@ -48,6 +48,11 @@ class HttpException extends RuntimeException
         return new static(404, $message);
     }
 
+    public static function forbidden(string $message = 'Forbidden'): static
+    {
+        return new static(403, $message);
+    }
+
     public static function methodNotAllowed(array $allowed): static
     {
         return new static(405, 'Method Not Allowed', ['allowed' => $allowed]);

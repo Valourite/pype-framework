@@ -1,0 +1,1 @@
+<form method="post"><?= $this->csrf() ?><input name="email" value="<?= e($this->old('email')) ?>"><?php if ($error = $this->error('email')): ?><p class="error"><?= e($error) ?></p><?php endif ?><?= $this->partial('form_footer') ?></form>

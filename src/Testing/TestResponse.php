@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pype\Testing;
 
+use Pype\Http\Cookie;
 use Pype\Http\Request;
 use Pype\Http\Response;
 
@@ -25,9 +26,22 @@ final class TestResponse
         return $this->response->status();
     }
 
+    /** A cookie the response sets, by name. */
+    public function cookie(string $name): ?Cookie
+    {
+        foreach ($this->response->cookies() as $cookie) {
+            if ($cookie->name === $name) {
+                return $cookie;
+            }
+        }
+
+        return null;
+    }
+
     public function header(string $name): ?string
     {
-        return $this->response->header($name);
+        // Content-Type is normally filled in from the outlet at send time; report it the same way.
+        return strcasecmp($name, 'Content-Type') === 0 ? $this->response->contentType() : $this->response->header($name);
     }
 
     /** The formatted body exactly as a client would receive it. */

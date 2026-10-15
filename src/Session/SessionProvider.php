@@ -1,0 +1,37 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Pype\Session;
+
+use Pype\Application;
+use Pype\Database\Connection;
+use Pype\Provider;
+
+/**
+ * Binds the SessionStore from config/session.php and registers the 'web' stack:
+ * StartSession → VerifyCsrfToken → FlashValidationErrors.
+ */
+final class SessionProvider implements Provider
+{
+    public function register(Application $app): void
+    {
+        $app->container->singleton(SessionStore::class, fn ($c) => match ($app->config('session.driver', 'database')) {
+            'database' => new DatabaseSessionStore($c->get(Connection::class), $app->config('session.table', 'sessions')),
+            'array' => new ArraySessionStore(),
+            default => $c->get($app->config('session.driver')),   // a class name of your own store
+        });
+
+        $app->stack('web', [
+            new StartSession(
+                cookie: $app->config('session.cookie', 'pype_session'),
+                lifetimeMinutes: (int) $app->config('session.lifetime', 120),
+                secure: (bool) $app->config('session.secure', false),
+                sameSite: $app->config('session.same_site', 'Lax'),
+                domain: $app->config('session.domain'),
+            ),
+            new VerifyCsrfToken(except: $app->config('session.csrf_except', [])),
+            new FlashValidationErrors(),
+        ]);
+    }
+}

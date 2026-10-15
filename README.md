@@ -16,15 +16,16 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype`             | `Application` (lifecycle, config, providers, error rendering/reporting), `Provider`         |
 | `Pype\Pipeline`    | `Stage` interface, `Pipeline`, `Invoker` (parameter injection for closures/invokables)    |
 | `Pype\Routing`     | `Router` (groups, named stacks), `Route`                                                  |
-| `Pype\Http`        | `Request`, `Response`, typed `Context`                                                    |
+| `Pype\Http`        | `Request`, `Response`, `Cookie`, typed `Context`                                          |
 | `Pype\Outlet`      | `Outlet` (abstract exit stage), `JsonOutlet`                                             |
 | `Pype\View`        | plain-PHP templates: `ViewOutlet` (class-based views), `View`, layouts and partials      |
-| `Pype\Database`    | PDO `Connection`, `QueryBuilder`, `.sql` `Migrator` — SQLite (WAL), MySQL, Postgres         |
-| `Pype\Auth`        | bearer-token auth: `Auth`, `Authenticate` stage, `AccessToken`                             |
+| `Pype\Database`    | PDO `Connection`, `QueryBuilder` (joins, grouping, aggregates), `.sql` `Migrator` — SQLite (WAL), MySQL, Postgres |
+| `Pype\Auth`        | `Auth` (users, passwords, API tokens), `Authenticate` stage, `Guard`s: `SessionGuard`, `TokenGuard`, or your own |
+| `Pype\Session`     | `StartSession`, `VerifyCsrfToken`, `FlashValidationErrors` (the `'web'` stack), `Session`, swappable `SessionStore` |
 | `Pype\Stages`      | built-in stages: `Cors`, `JsonBody`, `RequestId`, `Throttle`                              |
 | `Pype\Validation`  | `Validate` stage, `Validator`, `ValidatedInput`                                           |
 | `Pype\Container`   | PSR-11 container with autowiring                                                          |
-| `Pype\Testing`     | `TestClient` — run requests in-process, no server                                         |
+| `Pype\Testing`     | `TestClient` — run requests in-process, no server; keeps cookies like a browser           |
 | `Pype\Console`     | `bin/pype` commands: serve, routes, make:*, migrate                                       |
 
 ## Development

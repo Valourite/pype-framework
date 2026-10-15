@@ -9,7 +9,8 @@ use Pype\Database\Connection;
 use Pype\Provider;
 
 /**
- * Binds Auth from config/auth.php and registers the 'auth' stack.
+ * Binds Auth from config/auth.php and registers the 'auth' stack (Authenticate with the
+ * configured guards).
  * Requires DatabaseProvider.
  */
 final class AuthProvider implements Provider
@@ -21,6 +22,6 @@ final class AuthProvider implements Provider
             $app->config('auth', []),
         ));
 
-        $app->stack('auth', [Authenticate::class]);
+        $app->stack('auth', [new Authenticate()]);
     }
 }

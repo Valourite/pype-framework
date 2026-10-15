@@ -12,6 +12,9 @@ use Pype\Http\Request;
  *
  *   $res = (new TestClient($app))->withHeaders(['Authorization' => 'Bearer x'])->get('/me');
  *   $res->status();  $res->json('data.name');
+ *
+ * Like a browser, a client keeps cookies (e.g. the session) between requests. Clients made
+ * with withHeaders() share the jar; withoutCookies() starts a separate "browser".
  */
 final class TestClient
 {
@@ -19,13 +22,25 @@ final class TestClient
     public function __construct(
         private readonly Application $app,
         private readonly array $headers = [],
+        private readonly CookieJar $cookies = new CookieJar(),
     ) {
     }
 
     /** @param array<string, string> $headers */
     public function withHeaders(array $headers): self
     {
-        return new self($this->app, [...$this->headers, ...$headers]);
+        return new self($this->app, [...$this->headers, ...$headers], $this->cookies);
+    }
+
+    /** A client with an empty cookie jar of its own: a second browser. */
+    public function withoutCookies(): self
+    {
+        return new self($this->app, $this->headers, new CookieJar());
+    }
+
+    public function cookies(): CookieJar
+    {
+        return $this->cookies;
     }
 
     public function get(string $uri, array $headers = []): TestResponse
@@ -55,8 +70,16 @@ final class TestClient
 
     public function request(string $method, string $uri, array $body = [], array $headers = []): TestResponse
     {
-        $request = Request::create($method, $uri, $body, [...$this->headers, ...$headers]);
+        $headers = [...$this->headers, ...$headers];
 
-        return new TestResponse($this->app->handle($request), $request);
+        if (($cookie = $this->cookies->header()) !== null && !array_key_exists('Cookie', $headers)) {
+            $headers['Cookie'] = $cookie;
+        }
+
+        $request = Request::create($method, $uri, $body, $headers);
+        $response = $this->app->handle($request);
+        $this->cookies->store($response->cookies());
+
+        return new TestResponse($response, $request);
     }
 }

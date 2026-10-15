@@ -25,7 +25,7 @@ final class Auth
     private const DUMMY_HASH_COST_10 = '$2y$10$wYp4hT67v1phntjjECP77ubOxgIIrDOsD3Zjz6mbi8yyFXdmRb1gW';
     private const DUMMY_HASH_COST_12 = '$2y$12$KnSa9GFAjdNzsAKqknW5/OBJlST49PIrz7AMC4ZExxfLMEPc3vFPK';
 
-    /** @var array{table: string, user: class-string, identifier: string, password: string, tokens_table: string, token_ttl: ?int} */
+    /** @var array{table: string, user: class-string, identifier: string, password: string, tokens_table: string, token_ttl: ?int, guards: list<class-string<Guard>|Guard>} */
     private array $config;
 
     public function __construct(private readonly Connection $db, array $config = [])
@@ -37,8 +37,15 @@ final class Auth
             'password' => 'password',
             'tokens_table' => 'api_tokens',
             'token_ttl' => null,
+            'guards' => [SessionGuard::class, TokenGuard::class],
             ...$config,
         ];
+    }
+
+    /** @return list<class-string<Guard>|Guard>  guards Authenticate uses by default */
+    public function guards(): array
+    {
+        return $this->config['guards'];
     }
 
     public function hash(string $password): string

@@ -24,6 +24,9 @@ final class Response
 
     private ?string $rendered = null;
 
+    /** @var list<Cookie> */
+    private array $cookies = [];
+
     /** @param array<string, string> $headers */
     public function __construct(
         private mixed $data = null,
@@ -36,6 +39,12 @@ final class Response
     public static function make(mixed $data, int $status = 200, array $headers = []): self
     {
         return new self($data, $status, $headers);
+    }
+
+    /** Redirect elsewhere. 303 after a form POST makes the browser follow up with a GET. */
+    public static function redirect(string $url, int $status = 302): self
+    {
+        return new self(null, $status, ['Location' => $url]);
     }
 
     public static function noContent(): self
@@ -109,6 +118,25 @@ final class Response
         return null;
     }
 
+    /** @return list<Cookie> */
+    public function cookies(): array
+    {
+        return $this->cookies;
+    }
+
+    public function withCookie(Cookie $cookie): self
+    {
+        $clone = clone $this;
+        $clone->cookies = [...array_filter($this->cookies, static fn (Cookie $c) => $c->name !== $cookie->name), $cookie];
+
+        return $clone;
+    }
+
+    public function isRedirect(): bool
+    {
+        return $this->status >= 300 && $this->status < 400 && $this->header('Location') !== null;
+    }
+
     public function outlet(): ?Outlet
     {
         return $this->outlet;
@@ -147,10 +175,16 @@ final class Response
         return $clone;
     }
 
+    /** The Content-Type the client receives: an explicit header, else the outlet's. */
+    public function contentType(): ?string
+    {
+        return $this->header('Content-Type') ?? $this->outlet?->contentType();
+    }
+
     /** Render the body using the attached outlet (computed once). */
     public function render(Request $request): string
     {
-        if ($this->status === 204 || $this->status === 304 || $this->outlet === null) {
+        if ($this->status === 204 || $this->status === 304 || $this->outlet === null || $this->isRedirect()) {
             return '';
         }
 
@@ -169,12 +203,16 @@ final class Response
         if (!headers_sent()) {
             http_response_code($this->status);
 
-            if ($this->outlet !== null && $this->header('Content-Type') === null) {
-                header('Content-Type: ' . $this->outlet->contentType());
+            if ($this->header('Content-Type') === null && ($type = $this->contentType()) !== null) {
+                header('Content-Type: ' . $type);
             }
 
             foreach ($this->headers as $name => $value) {
                 header("{$name}: {$value}");
+            }
+
+            foreach ($this->cookies as $cookie) {
+                header('Set-Cookie: ' . $cookie->toHeader(), false);
             }
         }
 

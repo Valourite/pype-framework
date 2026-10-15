@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pype\View;
 
+use Closure;
 use Psr\Container\ContainerInterface;
 use Pype\Container\ContainerAware;
 use Pype\Http\Request;
@@ -53,6 +54,15 @@ abstract class ViewOutlet extends Outlet implements ContainerAware
     protected function errorTemplate(): string
     {
         return 'errors/error';
+    }
+
+    public function handle(Request $request, Closure $next): mixed
+    {
+        $response = parent::handle($request, $next);
+
+        // A page needs no data: a route that is only a view (or whose stages return nothing)
+        // still renders, rather than becoming an empty 204.
+        return $response->status() === 204 && $response->outlet() === $this ? $response->withStatus(200) : $response;
     }
 
     public function setContainer(ContainerInterface $container): void

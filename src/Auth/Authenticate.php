@@ -9,45 +9,75 @@ use Psr\Container\ContainerInterface;
 use Pype\Container\ContainerAware;
 use Pype\Exceptions\HttpException;
 use Pype\Http\Request;
+use Pype\Http\Response;
 use Pype\Pipeline\Stage;
+use Pype\Session\Session;
 
 /**
- * Bearer-token guard. On success, puts the user (as your configured user class) and the
- * AccessToken in the context, so later stages can inject `User $user` / `AccessToken $token`.
+ * Requires a user. Asks each guard in turn (default: config auth.guards, i.e. session then
+ * bearer token) and puts the first user found in the context, so later stages can inject
+ * `User $user`.
  *
- *   ['auth', ShowProfile::class]                       // 'auth' stack = this stage (AuthProvider)
- *   [new Authenticate(optional: true), Feed::class]    // anonymous allowed; user injected if present
+ *   ['auth', ShowProfile::class]                                // 'auth' stack = new Authenticate()
+ *   [new Authenticate(guards: [TokenGuard::class]), ...]        // API only
+ *   ['web', new Authenticate(redirectTo: '/login'), ...]        // browsers go to the login page
+ *   [new Authenticate(optional: true), Feed::class]             // guests allowed; user injected if present
  */
 final class Authenticate implements Stage, ContainerAware
 {
-    private ?Auth $auth = null;
+    private ?ContainerInterface $container = null;
 
-    public function __construct(private readonly bool $optional = false)
-    {
+    /**
+     * @param list<class-string<Guard>|Guard>|null $guards  null = config('auth.guards')
+     * @param string|null $redirectTo  send browsers here instead of a 401 (JSON clients still get 401)
+     */
+    public function __construct(
+        private readonly ?array $guards = null,
+        private readonly bool $optional = false,
+        private readonly ?string $redirectTo = null,
+    ) {
     }
 
     public function setContainer(ContainerInterface $container): void
     {
-        $this->auth = $container->get(Auth::class);
+        $this->container = $container;
     }
 
     public function handle(Request $request, Closure $next): mixed
     {
-        $auth = $this->auth ?? throw new \LogicException('Authenticate needs the container. Is AuthProvider registered?');
+        $container = $this->container ?? throw new \LogicException('Authenticate needs the container. Is AuthProvider registered?');
 
-        if (preg_match('/^Bearer\s+(\S+)$/i', (string) $request->header('authorization'), $m)
-            && ($found = $auth->authenticateToken($m[1])) !== null
-        ) {
-            [$user, $token] = $found;
-            $request->context()->put($user)->put($token);
+        foreach ($this->guards ?? $container->get(Auth::class)->guards() as $guard) {
+            $guard = is_string($guard) ? $container->get($guard) : $guard;
 
-            return $next($request);
+            if (($user = $guard->authenticate($request)) !== null) {
+                $request->context()->put($user);
+
+                return $next($request);
+            }
         }
 
         if ($this->optional) {
             return $next($request);
         }
 
+        if ($this->redirectTo !== null && !$request->expectsJson()) {
+            $session = $request->context()->find(Session::class);
+
+            if ($session !== null && $request->method() === 'GET') {
+                $container->get(SessionGuard::class)->setIntended($session, $request->path() . $this->queryString($request));
+            }
+
+            return Response::redirect($this->redirectTo);
+        }
+
         throw HttpException::unauthorized();
+    }
+
+    private function queryString(Request $request): string
+    {
+        $query = $request->query();
+
+        return $query === [] ? '' : '?' . http_build_query($query);
     }
 }

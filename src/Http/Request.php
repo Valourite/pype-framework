@@ -22,6 +22,7 @@ final class Request
      * @param array<string, mixed>  $query
      * @param array<string, mixed>  $body
      * @param array<string, string> $headers  lower-cased header names
+     * @param array<string, string> $cookies
      */
     public function __construct(
         private readonly string $method,
@@ -31,6 +32,7 @@ final class Request
         private readonly array $headers = [],
         private readonly string $rawBody = '',
         private readonly string $ip = '127.0.0.1',
+        private readonly array $cookies = [],
     ) {
         $this->context = new Context();
     }
@@ -53,7 +55,7 @@ final class Request
             $headers['content-type'] ??= 'application/json';
         }
 
-        return new self(strtoupper($method), $parts['path'] ?? '/', $query, $body, $headers, $raw);
+        return new self(strtoupper($method), $parts['path'] ?? '/', $query, $body, $headers, $raw, cookies: self::parseCookies($headers['cookie'] ?? ''));
     }
 
     public static function fromGlobals(): self
@@ -85,7 +87,24 @@ final class Request
             headers: $headers,
             rawBody: $raw,
             ip: (string) ($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1'),
+            cookies: array_filter($_COOKIE, 'is_string'),
         );
+    }
+
+    /** @return array<string, string> */
+    private static function parseCookies(string $header): array
+    {
+        $cookies = [];
+
+        foreach (explode(';', $header) as $pair) {
+            [$name, $value] = array_pad(explode('=', trim($pair), 2), 2, null);
+
+            if ($name !== '' && $value !== null) {
+                $cookies[$name] = rawurldecode($value);
+            }
+        }
+
+        return $cookies;
     }
 
     public function method(): string
@@ -111,6 +130,33 @@ final class Request
     public function header(string $name, ?string $default = null): ?string
     {
         return $this->headers[strtolower($name)] ?? $default;
+    }
+
+    public function cookie(string $name, ?string $default = null): ?string
+    {
+        return $this->cookies[$name] ?? $default;
+    }
+
+    /** @return array<string, string> */
+    public function cookies(): array
+    {
+        return $this->cookies;
+    }
+
+    /**
+     * True when the client asked for JSON (Accept: application/json) or is a script
+     * (X-Requested-With). Stages use it to pick between a redirect and a JSON error.
+     */
+    public function expectsJson(): bool
+    {
+        return str_contains((string) $this->header('accept'), 'json')
+            || strcasecmp((string) $this->header('x-requested-with'), 'XMLHttpRequest') === 0;
+    }
+
+    /** GET, HEAD and OPTIONS: requests that should not change anything. */
+    public function isSafe(): bool
+    {
+        return in_array($this->method, ['GET', 'HEAD', 'OPTIONS'], true);
     }
 
     /**
