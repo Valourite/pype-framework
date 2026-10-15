@@ -52,7 +52,7 @@ final class PipelineTest extends TestCase
         $router->stack('a', ['X', 'b']);
         $router->stack('b', ['Y']);
 
-        $this->assertSame(['X', 'Y', 'Z'], $router->compile(['a', 'Z'])['stages']);
+        $this->assertSame(['X', 'Y', 'Z'], $router->compile(['a', 'Z']));
 
         $router->stack('b', ['a']);
         $this->expectException(LogicException::class);

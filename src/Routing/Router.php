@@ -7,7 +7,7 @@ namespace Pype\Routing;
 use Closure;
 use LogicException;
 use Pype\Exceptions\HttpException;
-use Pype\Format\Formatter;
+use Pype\Outlet\Outlet;
 use Pype\Pipeline\Stage;
 
 /**
@@ -37,7 +37,7 @@ final class Router
      * Name a reusable sequence of stages. Use the name anywhere a stage is accepted.
      * Stacks may reference other stacks, and may be defined before or after use.
      *
-     * @param list<string|Stage|Closure|Formatter> $stages
+     * @param list<string|object> $stages
      */
     public function stack(string $name, array $stages): void
     {
@@ -45,26 +45,34 @@ final class Router
     }
 
     /**
-     * Expand stack names and lift out any Formatter (last one wins, so a route's
-     * formatter beats its group's, which beats the global one).
+     * Expand stack names and move outlets to the front, keeping their relative order.
      *
-     * @param list<string|Stage|Closure|Formatter> $stages
-     * @return array{stages: list<string|Stage|Closure>, formatter: string|Formatter|null}
+     * Outlets act on the pipeline's result, so they must wrap every other stage. Placed
+     * first, the innermost (last listed) outlet claims the response before the outer ones
+     * see it — so a route's outlet beats its group's, which beats a global one.
+     *
+     * @param list<string|object> $stages
+     * @return list<string|object>
      */
     public function compile(array $stages): array
     {
-        $compiled = [];
-        $formatter = null;
+        $outlets = [];
+        $rest = [];
 
         foreach ($this->expand($stages) as $stage) {
-            if ($stage instanceof Formatter || (is_string($stage) && is_subclass_of($stage, Formatter::class))) {
-                $formatter = $stage;
+            if (self::isOutlet($stage)) {
+                $outlets[] = $stage;
             } else {
-                $compiled[] = $stage;
+                $rest[] = $stage;
             }
         }
 
-        return ['stages' => $compiled, 'formatter' => $formatter];
+        return [...$outlets, ...$rest];
+    }
+
+    public static function isOutlet(mixed $stage): bool
+    {
+        return $stage instanceof Outlet || (is_string($stage) && is_subclass_of($stage, Outlet::class));
     }
 
     /** @param list<string> $trail stack names being expanded, for cycle detection */

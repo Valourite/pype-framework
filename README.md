@@ -2,7 +2,7 @@
 
 The core of [pype](https://github.com/Valourite/pype-skeleton): a lightweight, pipeline-first PHP
 framework. Every route is its own pipeline of **stages**; output is data (JSON by default) that a
-**formatter** turns into bytes — or HTML through a view.
+**outlet** (the exit stage) writes out — JSON by default, HTML through a view, or your own format.
 
 > Start a new app with `composer create-project pype/pype my-app`. This package is the library that
 > lands in `vendor/`.
@@ -17,8 +17,8 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype\Pipeline`    | `Stage` interface, `Pipeline`, `Invoker` (parameter injection for closures/invokables)    |
 | `Pype\Routing`     | `Router` (groups, named stacks), `Route`                                                  |
 | `Pype\Http`        | `Request`, `Response`, typed `Context`                                                    |
-| `Pype\Format`      | `Formatter` interface, `JsonFormatter`                                                    |
-| `Pype\View`        | plain-PHP templates: `Views`, `View` formatter, layouts and partials                      |
+| `Pype\Outlet`      | `Outlet` (abstract exit stage), `JsonOutlet`                                             |
+| `Pype\View`        | plain-PHP templates: `ViewOutlet` (class-based views), `View`, layouts and partials      |
 | `Pype\Database`    | PDO `Connection`, `QueryBuilder`, `.sql` `Migrator` — SQLite (WAL), MySQL, Postgres         |
 | `Pype\Auth`        | bearer-token auth: `Auth`, `Authenticate` stage, `AccessToken`                             |
 | `Pype\Stages`      | built-in stages: `Cors`, `JsonBody`, `RequestId`, `Throttle`                              |

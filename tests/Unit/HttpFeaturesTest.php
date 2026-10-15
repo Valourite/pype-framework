@@ -73,7 +73,7 @@ final class HttpFeaturesTest extends TestCase
         $client = new TestClient($app);
 
         $res = $client->get('/hi/<b>');
-        $this->assertSame('text/html; charset=utf-8', $res->response()->formatter()?->contentType());
+        $this->assertSame('text/html; charset=utf-8', $res->response()->outlet()?->contentType());
         $this->assertSame("<main><h1>Hi &lt;b&gt;</h1>\n</main>", trim($res->body()));
 
         $this->assertStringContainsString('Missing: the thing', $client->get('/gone')->body());

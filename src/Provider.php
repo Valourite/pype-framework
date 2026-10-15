@@ -6,7 +6,7 @@ namespace Pype;
 
 /**
  * Hook for apps and composer packages to plug into Pype: bind services,
- * register stage stacks, add global stages, set a formatter, add routes.
+ * register stage stacks, add global stages, set the default outlet, add routes.
  *
  * List providers in config/app.php under 'providers'.
  */

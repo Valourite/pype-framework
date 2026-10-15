@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Pype\Http;
 
-use Pype\Format\Formatter;
+use Pype\Outlet\Outlet;
 
 /**
  * Outgoing response, independent of wire format.
  *
  * A Response holds *what* to send (data or error, status, headers, meta).
- * A Formatter decides *how* it is written (JSON by default, or anything you like).
+ * An Outlet decides *how* it is written (JSON by default, a View, or anything you like).
  */
 final class Response
 {
@@ -20,7 +20,7 @@ final class Response
     /** @var array<string, mixed>|null */
     private ?array $error = null;
 
-    private ?Formatter $formatter = null;
+    private ?Outlet $outlet = null;
 
     private ?string $rendered = null;
 
@@ -109,9 +109,9 @@ final class Response
         return null;
     }
 
-    public function formatter(): ?Formatter
+    public function outlet(): ?Outlet
     {
-        return $this->formatter;
+        return $this->outlet;
     }
 
     public function withStatus(int $status): self
@@ -139,22 +139,22 @@ final class Response
         return $clone;
     }
 
-    public function withFormatter(Formatter $formatter): self
+    public function withOutlet(Outlet $outlet): self
     {
         $clone = clone $this;
-        $clone->formatter = $formatter;
+        $clone->outlet = $outlet;
 
         return $clone;
     }
 
-    /** Render the body using the attached formatter (computed once). */
+    /** Render the body using the attached outlet (computed once). */
     public function render(Request $request): string
     {
-        if ($this->status === 204 || $this->status === 304 || $this->formatter === null) {
+        if ($this->status === 204 || $this->status === 304 || $this->outlet === null) {
             return '';
         }
 
-        return $this->rendered ??= $this->formatter->format($this, $request);
+        return $this->rendered ??= $this->outlet->render($this, $request);
     }
 
     public function __clone()
@@ -169,8 +169,8 @@ final class Response
         if (!headers_sent()) {
             http_response_code($this->status);
 
-            if ($this->formatter !== null && $this->header('Content-Type') === null) {
-                header('Content-Type: ' . $this->formatter->contentType());
+            if ($this->outlet !== null && $this->header('Content-Type') === null) {
+                header('Content-Type: ' . $this->outlet->contentType());
             }
 
             foreach ($this->headers as $name => $value) {

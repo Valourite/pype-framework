@@ -7,6 +7,7 @@ namespace Pype\Console;
 use Closure;
 use Pype\Application;
 use Pype\Database\Migrator;
+use Pype\Routing\Router;
 
 /**
  * Minimal CLI: `php bin/pype <command> [args]`.
@@ -22,7 +23,7 @@ final class Console
             'serve' => ['Start the dev server [--port=8000] [--host=localhost]', $this->serve(...)],
             'routes' => ['List routes and their compiled pipelines', $this->routes(...)],
             'make:stage' => ['Create app/Stages/<Name>.php', fn (array $a) => $this->make('Stages', $a[0] ?? null, 'stage')],
-            'make:formatter' => ['Create app/Formatters/<Name>.php', fn (array $a) => $this->make('Formatters', $a[0] ?? null, 'formatter')],
+            'make:outlet' => ['Create app/Outlets/<Name>.php', fn (array $a) => $this->make('Outlets', $a[0] ?? null, 'outlet')],
             'make:provider' => ['Create app/Providers/<Name>.php', fn (array $a) => $this->make('Providers', $a[0] ?? null, 'provider')],
             'make:migration' => ['Create database/migrations/<timestamp>_<name>.sql', $this->makeMigration(...)],
             'migrate' => ['Run pending SQL migrations', $this->migrate(...)],
@@ -77,10 +78,11 @@ final class Console
 
         foreach ($this->app->router->routes() as $route) {
             $compiled = $this->app->router->compile($route->stages());
-            $stages = implode(' → ', array_map($describe, $compiled['stages']));
-            $formatter = $compiled['formatter'] === null ? '' : '  ⇒ ' . $describe($compiled['formatter']);
+            $outlets = array_filter($compiled, Router::isOutlet(...));
+            $stages = implode(' → ', array_map($describe, array_diff_key($compiled, $outlets)));
+            $outlet = $outlets === [] ? '' : '  ⇒ ' . $describe(end($outlets));
 
-            printf("%-7s %-28s %s%s\n", $route->method(), $route->path(), $stages, $formatter);
+            printf("%-7s %-28s %s%s\n", $route->method(), $route->path(), $stages, $outlet);
         }
 
         return 0;
@@ -167,14 +169,14 @@ final class Console
                     }
                 }
                 PHP,
-            'formatter' => <<<PHP
-                use Pype\Format\Formatter;
+            'outlet' => <<<PHP
                 use Pype\Http\Request;
                 use Pype\Http\Response;
+                use Pype\Outlet\Outlet;
 
-                final class {$class} implements Formatter
+                final class {$class} extends Outlet
                 {
-                    public function format(Response \$response, Request \$request): string
+                    public function render(Response \$response, Request \$request): string
                     {
                         return (string) json_encode(\$response->isError() ? \$response->errorDetails() : \$response->data());
                     }

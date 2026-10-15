@@ -11,10 +11,10 @@ use Pype\Container\ContainerAware;
 use Pype\Exceptions\ErrorLogReporter;
 use Pype\Exceptions\HttpException;
 use Pype\Exceptions\Reporter;
-use Pype\Format\Formatter;
-use Pype\Format\JsonFormatter;
 use Pype\Http\Request;
 use Pype\Http\Response;
+use Pype\Outlet\JsonOutlet;
+use Pype\Outlet\Outlet;
 use Pype\Pipeline\Pipeline;
 use Pype\Routing\Router;
 use Throwable;
@@ -22,7 +22,7 @@ use Throwable;
 /**
  * The request lifecycle:
  *
- *   Request ─▶ [global stages] ─▶ route lookup ─▶ [group + route stages] ─▶ Response ─▶ Formatter ─▶ bytes
+ *   Request ─▶ [global stages] ─▶ route lookup ─▶ [group + route stages] ─▶ Response ─▶ Outlet ─▶ bytes
  *
  * Inside every pipeline:
  *   - each stage's return value is normalised with Response::from(), so $next() always returns a Response
@@ -36,7 +36,7 @@ final class Application
     /** @var list<string|object> stages that run for every request */
     private array $globalStages = [];
 
-    private string|Formatter $formatter = JsonFormatter::class;
+    private string|Outlet $outlet = JsonOutlet::class;
 
     /** @var list<class-string<Reporter>|Reporter|Closure> */
     private array $reporters = [];
@@ -122,10 +122,10 @@ final class Application
         return $this;
     }
 
-    /** Set the app-wide default formatter (JSON unless changed). */
-    public function formatter(string|Formatter $formatter): self
+    /** Set the app-wide default outlet (JsonOutlet unless changed). */
+    public function outlet(string|Outlet $outlet): self
     {
-        $this->formatter = $formatter;
+        $this->outlet = $outlet;
 
         return $this;
     }
@@ -174,21 +174,22 @@ final class Application
     {
         $this->container->instance(Request::class, $request);
 
-        $global = $this->router->compile($this->globalStages);
-
         $response = $this->pipeline()
             ->send($request)
-            ->through($global['stages'])
+            ->through($this->router->compile($this->globalStages))
             ->then(fn (Request $request) => $this->dispatch($request));
 
-        $response = $this->applyFormatter($response, $global['formatter'] ?? $this->formatter);
+        // No route/group/global outlet claimed it (or the route was never reached): use the default.
+        if ($response->outlet() === null) {
+            $response = $response->withOutlet($this->resolveOutlet($this->outlet));
+        }
 
-        // Render now, so a failing formatter/template is still reported and answered with a 500.
+        // Render now, so a failing outlet/template is still reported and answered with a 500.
         try {
             $response->render($request);
         } catch (Throwable $e) {
             $this->report($e, $request);
-            $response = $this->defaultRender($e)->withFormatter(new JsonFormatter());
+            $response = $this->defaultRender($e)->withOutlet(new JsonOutlet());
         }
 
         return $response;
@@ -207,16 +208,10 @@ final class Application
 
         $request->setParams($params);
 
-        $compiled = $this->router->compile($route->stages());
-
-        $response = $this->pipeline()
+        return $this->pipeline()
             ->send($request)
-            ->through($compiled['stages'])
+            ->through($this->router->compile($route->stages()))
             ->then(static fn () => null);
-
-        return $compiled['formatter'] === null
-            ? $response
-            : $this->applyFormatter($response, $compiled['formatter']);
     }
 
     private function pipeline(): Pipeline
@@ -226,20 +221,15 @@ final class Application
             ->onException(fn (Throwable $e, Request $request) => $this->renderException($e, $request));
     }
 
-    /** Attach a formatter unless something closer to the route already did. */
-    private function applyFormatter(Response $response, string|Formatter $formatter): Response
+    private function resolveOutlet(string|Outlet $outlet): Outlet
     {
-        if ($response->formatter() !== null) {
-            return $response;
+        $outlet = is_string($outlet) ? $this->container->make($outlet) : $outlet;
+
+        if ($outlet instanceof ContainerAware) {
+            $outlet->setContainer($this->container);
         }
 
-        $formatter = is_string($formatter) ? $this->container->make($formatter) : $formatter;
-
-        if ($formatter instanceof ContainerAware) {
-            $formatter->setContainer($this->container);
-        }
-
-        return $response->withFormatter($formatter);
+        return $outlet;
     }
 
     private function renderException(Throwable $e, Request $request): Response
