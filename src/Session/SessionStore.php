@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Pype\Session;
 
 /**
- * Where session data lives. Built in: DatabaseSessionStore, ArraySessionStore.
+ * Where session data lives. Built in: DatabaseSessionStore, FileSessionStore, ArraySessionStore.
  * Implement this for Redis, files, etc. and bind it in a provider.
  */
 interface SessionStore

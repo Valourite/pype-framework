@@ -17,6 +17,8 @@ use Throwable;
  *       <input name="email" value="<?= e($this->old('email')) ?>">
  *       <?php if ($error = $this->error('email')): ?><p><?= e($error) ?></p><?php endif ?>
  *   </form>
+ *
+ *   <form method="post" action="/posts/5"><?= $this->csrf() ?><?= $this->method('DELETE') ?> ...</form>
  */
 final class Template
 {
@@ -86,6 +88,12 @@ final class Template
     public function csrf(): string
     {
         return '<input type="hidden" name="_token" value="' . e($this->csrfToken()) . '">';
+    }
+
+    /** Hidden `_method` input, for PUT/PATCH/DELETE from a form (needs the MethodOverride stage). */
+    public function method(string $method): string
+    {
+        return '<input type="hidden" name="_method" value="' . e(strtoupper($method)) . '">';
     }
 
     /** The raw token, e.g. for <meta name="csrf-token"> and an X-CSRF-Token header in fetch(). */

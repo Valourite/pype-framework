@@ -30,10 +30,10 @@ class Validate implements Stage
         return $this->rules;
     }
 
-    /** Which input to validate; override to validate query params instead. */
+    /** Which input to validate: the body plus uploaded files. Override to validate query params instead. */
     protected function data(Request $request): array
     {
-        return $request->input();
+        return [...$request->input(), ...$request->files()];
     }
 
     public function handle(Request $request, Closure $next): mixed

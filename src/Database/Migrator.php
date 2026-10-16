@@ -4,14 +4,19 @@ declare(strict_types=1);
 
 namespace Pype\Database;
 
+use Pype\Database\Schema\Migration;
+use Pype\Database\Schema\Schema;
 use RuntimeException;
 
 /**
- * Forward-only migrations from plain .sql files, applied in filename order:
+ * Forward-only migrations, applied in filename order. Either PHP (schema builder, runs on
+ * every database) or plain SQL (exactly what you write):
  *
- *   database/migrations/2026_10_15_120000_create_users_table.sql
+ *   database/migrations/2026_10_15_120000_create_users_table.php
+ *   database/migrations/2026_10_15_130000_add_search_view.sql
  *
- * Each file runs inside a transaction and is recorded in the pype_migrations table.
+ * Each file runs inside a transaction and is recorded in the pype_migrations table by name
+ * (without extension), so converting a .sql migration to .php doesn't run it again.
  */
 final class Migrator
 {
@@ -28,11 +33,9 @@ final class Migrator
         $applied = [];
 
         foreach ($this->pending() as $name => $file) {
-            $sql = (string) file_get_contents($file);
-
             try {
-                $this->db->transaction(function (Connection $db) use ($name, $sql) {
-                    $db->statement($sql);
+                $this->db->transaction(function (Connection $db) use ($name, $file) {
+                    $this->run($file);
                     $db->table(self::TABLE)->insert(['name' => $name, 'ran_at' => date('Y-m-d H:i:s')]);
                 });
             } catch (\Throwable $e) {
@@ -43,6 +46,23 @@ final class Migrator
         }
 
         return $applied;
+    }
+
+    private function run(string $file): void
+    {
+        if (str_ends_with($file, '.sql')) {
+            $this->db->statement((string) file_get_contents($file));
+
+            return;
+        }
+
+        $migration = require $file;
+
+        if (!$migration instanceof Migration) {
+            throw new RuntimeException('A .php migration must return a ' . Migration::class . ' (return new class extends Migration { ... };).');
+        }
+
+        $migration->up(new Schema($this->db));
     }
 
     /** @return array<string, bool> every migration file => whether it has run */
@@ -70,8 +90,16 @@ final class Migrator
     {
         $files = [];
 
-        foreach (glob(rtrim($this->directory, '/') . '/*.sql') ?: [] as $path) {
-            $files[basename($path, '.sql')] = $path;
+        $dir = rtrim($this->directory, '/');
+
+        foreach ([...(glob("{$dir}/*.sql") ?: []), ...(glob("{$dir}/*.php") ?: [])] as $path) {
+            $name = pathinfo($path, PATHINFO_FILENAME);
+
+            if (isset($files[$name])) {
+                throw new RuntimeException("Migration {$name} exists as both .sql and .php; keep one.");
+            }
+
+            $files[$name] = $path;
         }
 
         ksort($files);

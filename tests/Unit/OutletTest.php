@@ -6,6 +6,7 @@ namespace Pype\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use Pype\Application;
+use Pype\Exceptions\HttpException;
 use Pype\Http\Request;
 use Pype\Http\Response;
 use Pype\Outlet\JsonOutlet;
@@ -62,6 +63,15 @@ final class OutletTest extends TestCase
         $this->assertSame('default:error:No route for GET /missing', $this->client->get('/missing')->body());
     }
 
+    public function test_content_type_can_depend_on_the_response(): void
+    {
+        $this->app->router->get('/ok', [new SplitTypeOutlet(), fn () => 'fine']);
+        $this->app->router->get('/fail', [new SplitTypeOutlet(), fn () => throw HttpException::notFound()]);
+
+        $this->assertSame('text/csv', $this->client->get('/ok')->header('Content-Type'));
+        $this->assertSame('application/json', $this->client->get('/fail')->header('Content-Type'));
+    }
+
     public function test_custom_json_envelope_by_extension(): void
     {
         $this->app->outlet(EnvelopeJson::class);
@@ -94,9 +104,22 @@ final class TextOutlet extends Outlet
         return "{$this->label}:{$body}";
     }
 
-    public function contentType(): string
+    public function contentType(Response $response): string
     {
         return 'text/plain';
+    }
+}
+
+final class SplitTypeOutlet extends Outlet
+{
+    public function render(Response $response, Request $request): string
+    {
+        return $response->isError() ? json_encode($response->errorDetails()) : (string) $response->data();
+    }
+
+    public function contentType(Response $response): string
+    {
+        return $response->isError() ? 'application/json' : 'text/csv';
     }
 }
 

@@ -8,6 +8,9 @@ use InvalidArgumentException;
 use LogicException;
 use PHPUnit\Framework\TestCase;
 use Pype\Database\Connection;
+use Pype\Database\Schema\Schema;
+use Pype\Database\Schema\Table;
+use Pype\Tests\Support\TestDatabase;
 
 final class QueryBuilderTest extends TestCase
 {
@@ -15,13 +18,20 @@ final class QueryBuilderTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->db = Connection::sqlite();
-        $this->db->statement(<<<'SQL'
-            CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
-            CREATE TABLE expenses (id INTEGER PRIMARY KEY, category_id INTEGER NULL, amount INTEGER NOT NULL, note TEXT);
-            INSERT INTO categories (id, name) VALUES (1, 'Food'), (2, 'Rent'), (3, 'Unused');
-            INSERT INTO expenses (category_id, amount, note) VALUES (1, 10, 'a'), (1, 30, 'b'), (2, 500, 'c'), (NULL, 7, 'd');
-            SQL);
+        $this->db = TestDatabase::fresh();
+        $schema = new Schema($this->db);
+        $schema->create('categories', function (Table $t) {
+            $t->id();
+            $t->string('name');
+        });
+        $schema->create('expenses', function (Table $t) {
+            $t->id();
+            $t->foreignId('category_id')->nullable();
+            $t->integer('amount');
+            $t->text('note')->nullable();
+        });
+        $this->db->execute("INSERT INTO categories (name) VALUES ('Food'), ('Rent'), ('Unused')");
+        $this->db->execute("INSERT INTO expenses (category_id, amount, note) VALUES (1, 10, 'a'), (1, 30, 'b'), (2, 500, 'c'), (NULL, 7, 'd')");
     }
 
     public function test_aliases_and_joins(): void
@@ -45,10 +55,12 @@ final class QueryBuilderTest extends TestCase
             ->select('c.name')
             ->selectRaw('COUNT(*) AS n, SUM(e.amount) AS total')
             ->groupBy('c.id')
-            ->having('total', '>', 20)
+            ->havingRaw('SUM(e.amount) > ?', [20])   // Postgres can't see select aliases in HAVING
             ->orderBy('total', 'desc')
             ->get();
 
+        // Raw SUM() comes back as a numeric string on MySQL/Postgres (DECIMAL/NUMERIC), an int on SQLite.
+        $rows = array_map(fn (array $r) => [...$r, 'total' => (int) $r['total']], $rows);
         $this->assertSame([['name' => 'Rent', 'n' => 1, 'total' => 500], ['name' => 'Food', 'n' => 2, 'total' => 40]], $rows);
     }
 
@@ -56,7 +68,7 @@ final class QueryBuilderTest extends TestCase
     {
         $q = $this->db->table('expenses')
             ->select('note')
-            ->selectRaw('amount * ? AS doubled', [2])
+            ->selectRaw('MAX(amount) * ? AS doubled', [2])
             ->where('amount', '>', 9)
             ->whereRaw('note <> ?', ['c'])
             ->groupBy('note')
@@ -84,6 +96,27 @@ final class QueryBuilderTest extends TestCase
         $this->assertSame(540, $expenses()->orderBy('amount')->limit(3)->offset(1)->select('amount')->sum('amount'));
         $this->assertTrue($expenses()->groupBy('category_id')->exists());
         $this->assertFalse($expenses()->where('amount', 0)->exists());
+    }
+
+    public function test_paginate(): void
+    {
+        $page = $this->db->table('expenses')->orderBy('amount')->paginate(perPage: 3, page: 2);
+
+        $this->assertSame([['id' => 3, 'category_id' => 2, 'amount' => 500, 'note' => 'c']], $page->items);
+        $this->assertSame(['page' => 2, 'per_page' => 3, 'total' => 4, 'last_page' => 2], $page->meta());
+        $this->assertTrue($page->hasPrevious());
+        $this->assertFalse($page->hasNext());
+
+        $this->assertSame(1, $this->db->table('expenses')->paginate(3, -5)->page);
+        $this->assertSame([], $this->db->table('expenses')->paginate(3, 9)->items);
+        $this->assertSame(1, $this->db->table('expenses')->where('amount', 0)->paginate()->lastPage());
+
+        // Grouped queries count their groups.
+        $this->assertSame(3, $this->db->table('expenses')->groupBy('category_id')->select('category_id')->paginate(2)->total);
+
+        $response = $page->toResponse();
+        $this->assertSame(['pagination' => $page->meta()], $response->meta());
+        $this->assertSame($page->items, $response->data());
     }
 
     public function test_aliases_are_validated(): void

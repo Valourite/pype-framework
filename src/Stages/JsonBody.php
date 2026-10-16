@@ -29,23 +29,23 @@ final class JsonBody implements Stage
     public function handle(Request $request, Closure $next): mixed
     {
         $raw = $request->rawBody();
-        $length = max(strlen($raw), (int) $request->header('content-length', '0'));
+        $isJson = (bool) preg_match('#^application/(.+\+)?json#i', $request->header('content-type', ''));
 
-        if ($length > $this->maxBytes) {
+        // Only JSON is this stage's business. Form posts and uploads are limited by PHP's own
+        // post_max_size / upload_max_filesize.
+        if (!$isJson) {
+            if ($this->requireJson && $raw !== '') {
+                throw new HttpException(415, 'Unsupported Media Type: send application/json');
+            }
+
+            return $next($request);
+        }
+
+        if (max(strlen($raw), (int) $request->header('content-length', '0')) > $this->maxBytes) {
             throw new HttpException(413, 'Payload Too Large', ['max_bytes' => $this->maxBytes]);
         }
 
         if ($raw === '') {
-            return $next($request);
-        }
-
-        $isJson = (bool) preg_match('#^application/(.+\+)?json#i', $request->header('content-type', ''));
-
-        if (!$isJson) {
-            if ($this->requireJson) {
-                throw new HttpException(415, 'Unsupported Media Type: send application/json');
-            }
-
             return $next($request);
         }
 

@@ -185,7 +185,7 @@ final class QueryBuilder
         return $this;
     }
 
-    /** having('total', '>', 100) — column or select alias. */
+    /** having('total', '>', 100): a column, or a select alias on SQLite/MySQL (Postgres needs havingRaw('SUM(x) > ?')). */
     public function having(string $column, string $operator, mixed $value, string $boolean = 'AND'): self
     {
         $this->havings[] = [$boolean, $this->col($column) . ' ' . $this->operator($operator) . ' ?'];
@@ -255,6 +255,21 @@ final class QueryBuilder
         $row = $this->db->first((clone $this)->limit(1)->toSql(), $this->bindings());
 
         return $row === null ? null : $this->hydrate($row);
+    }
+
+    /**
+     * One page of results plus the total count. $page is clamped to at least 1; past the
+     * last page you get an empty page (and the real total, so the UI can link back).
+     */
+    public function paginate(int $perPage = 15, int $page = 1): Page
+    {
+        $perPage = max(1, $perPage);
+        $page = max(1, $page);
+        $total = (clone $this)->count();
+
+        $items = $total === 0 ? [] : (clone $this)->limit($perPage)->offset(($page - 1) * $perPage)->get();
+
+        return new Page($items, $total, $perPage, $page);
     }
 
     public function value(string $column): mixed

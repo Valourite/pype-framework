@@ -6,10 +6,15 @@ namespace Pype\Database;
 
 use Pype\Application;
 use Pype\Provider;
+use Pype\RateLimit\ApcuRateLimiter;
+use Pype\RateLimit\ArrayRateLimiter;
+use Pype\RateLimit\DatabaseRateLimiter;
+use Pype\RateLimit\RateLimiter;
 
 /**
  * Binds Connection (lazy — no connection is opened until first query) and Migrator
- * from config/database.php. Type-hint Connection in any stage or stage to use it.
+ * from config/database.php, and the RateLimiter used by Throttle (database.rate_limits).
+ * Type-hint Connection in any stage or handler to use it.
  */
 final class DatabaseProvider implements Provider
 {
@@ -30,5 +35,12 @@ final class DatabaseProvider implements Provider
             $c->get(Connection::class),
             $app->path($app->config('database.migrations', 'database/migrations')),
         ));
+
+        $app->container->singleton(RateLimiter::class, fn ($c) => match ($driver = $app->config('database.rate_limits.driver', 'database')) {
+            'database' => new DatabaseRateLimiter($c->get(Connection::class), $app->config('database.rate_limits.table', 'rate_limits')),
+            'apcu' => new ApcuRateLimiter(),
+            'array' => new ArrayRateLimiter(),
+            default => $c->get($driver),   // a class name of your own limiter
+        });
     }
 }

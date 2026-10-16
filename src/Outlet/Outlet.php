@@ -26,7 +26,8 @@ abstract class Outlet implements Stage
     /** Turn the response into the bytes sent to the client. */
     abstract public function render(Response $response, Request $request): string;
 
-    abstract public function contentType(): string;
+    /** The Content-Type header for this response. It may differ for errors (e.g. JSON errors from a CSV outlet). */
+    abstract public function contentType(Response $response): string;
 
     /** Run the rest of the pipeline, then claim the response unless a closer outlet already did. */
     public function handle(Request $request, Closure $next): mixed

@@ -20,8 +20,45 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: pdo_sqlite
+          extensions: pdo_sqlite, apcu
+          ini-values: apc.enable_cli=1
           coverage: none
 
       - run: composer install --no-interaction --no-progress
       - run: vendor/bin/phpunit
+
+  databases:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: secret
+          MYSQL_DATABASE: pype_test
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping -psecret" --health-interval=5s --health-timeout=5s --health-retries=20
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: pype_test
+        ports: ['5432:5432']
+        options: --health-cmd="pg_isready -U postgres" --health-interval=5s --health-timeout=5s --health-retries=20
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [mysql, pgsql]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, pdo_pgsql, apcu
+          ini-values: apc.enable_cli=1
+          coverage: none
+
+      - run: composer install --no-interaction --no-progress
+      - run: vendor/bin/phpunit
+        env:
+          PYPE_TEST_DB: ${{ matrix.db }}

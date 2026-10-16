@@ -8,6 +8,7 @@ use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use Pype\Database\Connection;
 use Pype\Database\Migrator;
+use Pype\Tests\Support\TestDatabase;
 
 final class DatabaseTest extends TestCase
 {
@@ -15,7 +16,7 @@ final class DatabaseTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->db = Connection::sqlite();
+        $this->db = TestDatabase::fresh();
         (new Migrator($this->db, __DIR__ . '/../fixtures/migrations'))->migrate();
     }
 
@@ -66,6 +67,46 @@ final class DatabaseTest extends TestCase
         }
 
         $this->assertFalse($this->db->table('items')->where('name', 'ghost')->exists());
+    }
+
+    public function test_sqlite_transactions_take_the_write_lock_up_front(): void
+    {
+        if (TestDatabase::driver() !== 'sqlite') {
+            $this->markTestSkipped('SQLite only.');
+        }
+
+        $file = tempnam(sys_get_temp_dir(), 'pype');
+        $a = new Connection(['driver' => 'sqlite', 'database' => $file, 'pragmas' => ['busy_timeout' => 50]]);
+        $b = new Connection(['driver' => 'sqlite', 'database' => $file, 'pragmas' => ['busy_timeout' => 50]]);
+        $a->statement('CREATE TABLE hits (n INTEGER)');
+
+        // While A's transaction is open (even before it writes), B can't write: writers queue
+        // instead of A failing later with "database is locked" when it upgrades to a write.
+        $blocked = $a->transaction(function (Connection $a) use ($b) {
+            $a->scalar('SELECT COUNT(*) FROM hits');
+            try {
+                $b->execute('INSERT INTO hits VALUES (1)');
+
+                return false;
+            } catch (\PDOException) {
+                return true;
+            }
+        });
+        $this->assertTrue($blocked);
+
+        // Commit, rollback and nesting work.
+        $a->transaction(fn (Connection $a) => $a->transaction(fn () => $a->execute('INSERT INTO hits VALUES (2)')));
+        try {
+            $a->transaction(function (Connection $a) {
+                $a->execute('INSERT INTO hits VALUES (3)');
+                throw new \RuntimeException('nope');
+            });
+        } catch (\RuntimeException) {
+        }
+        $this->assertSame([2], array_column($b->select('SELECT n FROM hits'), 'n'));
+        $b->execute('INSERT INTO hits VALUES (4)');   // the lock was released
+
+        unlink($file);
     }
 
     public function test_identifiers_are_validated(): void

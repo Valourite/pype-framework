@@ -62,6 +62,10 @@ final class HttpFeaturesTest extends TestCase
         $this->assertSame(400, $app->handle($malformed)->status());
 
         $this->assertSame(['a' => 1], $client->post('/echo', ['a' => 1])->json('data'));
+
+        // Uploads and form posts aren't JSON: PHP's post_max_size limits those, not this stage.
+        $upload = new Request('POST', '/echo', [], ['a' => '1'], ['content-type' => 'multipart/form-data; boundary=x', 'content-length' => '5000000']);
+        $this->assertSame(200, $app->handle($upload)->status());
     }
 
     public function test_view_formatter_renders_templates_and_error_pages(): void

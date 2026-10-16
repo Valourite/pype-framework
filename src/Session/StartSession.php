@@ -32,6 +32,7 @@ final class StartSession implements Stage, ContainerAware
         private readonly string $sameSite = 'Lax',
         private readonly ?string $domain = null,
         private readonly int $gcChance = 100,   // 1 in N requests prunes expired sessions; 0 = never
+        private readonly int $touchSeconds = 60, // an unchanged session is re-saved (expiry slid) at most this often
     ) {
     }
 
@@ -45,6 +46,8 @@ final class StartSession implements Stage, ContainerAware
         $store = $this->store ?? throw new \LogicException('StartSession needs the container. Is SessionProvider registered?');
 
         $session = $this->load($store, $request->cookie($this->cookie));
+        $loaded = $session->all();
+        $lastWritten = (int) $session->get(Session::WRITTEN, 0);
         $session->token();
         $request->context()->put($session);
 
@@ -58,8 +61,16 @@ final class StartSession implements Stage, ContainerAware
             $store->gc();
         }
 
-        // Written every request so the expiry slides while the user is active.
-        $store->write($session->id(), $session->dataToStore(), $this->lifetimeMinutes * 60);
+        // Most page views change nothing, so skip the write unless the data changed or the
+        // expiry needs sliding forward. Saves a store write (a DB write) on nearly every click.
+        $data = $session->dataToStore();
+        unset($data[Session::WRITTEN]);
+        $now = time();
+
+        if ($session->isNew() || $session->replacedIds() !== [] || $data !== $loaded || $now - $lastWritten >= $this->touchSeconds) {
+            $data[Session::WRITTEN] = $now;
+            $store->write($session->id(), $data, $this->lifetimeMinutes * 60);
+        }
 
         return $response->withCookie(new Cookie(
             $this->cookie,

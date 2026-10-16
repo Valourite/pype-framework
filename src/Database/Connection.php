@@ -24,6 +24,8 @@ final class Connection
     /** @var array<string, PDOStatement> */
     private array $statements = [];
 
+    private bool $inSqliteTransaction = false;
+
     /**
      * @param array<string, mixed> $config  one entry from config/database.php 'connections'
      */
@@ -39,6 +41,13 @@ final class Connection
     public function driver(): string
     {
         return $this->config['driver'];
+    }
+
+    /** Close the connection; the next query opens a new one. */
+    public function disconnect(): void
+    {
+        $this->statements = [];
+        $this->pdo = null;
     }
 
     public function pdo(): PDO
@@ -91,7 +100,8 @@ final class Connection
 
     /**
      * Runs $callback in a transaction; commits on return, rolls back on exception.
-     * Nested calls join the outer transaction.
+     * Nested calls join the outer transaction. On SQLite it is BEGIN IMMEDIATE: concurrent
+     * writers queue (up to busy_timeout) instead of failing.
      *
      * @template T
      * @param Closure(self): T $callback
@@ -101,8 +111,12 @@ final class Connection
     {
         $pdo = $this->pdo();
 
-        if ($pdo->inTransaction()) {
+        if ($this->inSqliteTransaction || $pdo->inTransaction()) {
             return $callback($this);
+        }
+
+        if ($this->driver() === 'sqlite') {
+            return $this->sqliteTransaction($pdo, $callback);
         }
 
         $pdo->beginTransaction();
@@ -122,6 +136,31 @@ final class Connection
             }
 
             throw $e;
+        }
+    }
+
+    /**
+     * SQLite: take the write lock up front with BEGIN IMMEDIATE. A plain BEGIN starts
+     * read-only and upgrades on the first write; if another connection wrote in between,
+     * SQLite fails the upgrade at once with "database is locked" instead of waiting
+     * busy_timeout. Tracked here because PDO before PHP 8.4 doesn't see a manual BEGIN.
+     */
+    private function sqliteTransaction(PDO $pdo, Closure $callback): mixed
+    {
+        $pdo->exec('BEGIN IMMEDIATE');
+        $this->inSqliteTransaction = true;
+
+        try {
+            $result = $callback($this);
+            $pdo->exec('COMMIT');
+
+            return $result;
+        } catch (Throwable $e) {
+            $pdo->exec('ROLLBACK');
+
+            throw $e;
+        } finally {
+            $this->inSqliteTransaction = false;
         }
     }
 
@@ -177,16 +216,26 @@ final class Connection
             ...($c['options'] ?? []),
         ];
 
+        // Persistent connections skip the connect + auth handshake on every request (PHP-FPM);
+        // PDO rolls back anything a request left open before the next one reuses it.
+        if (!empty($c['persistent'])) {
+            $options[PDO::ATTR_PERSISTENT] = true;
+        }
+
         return match ($c['driver'] ?? null) {
             'sqlite' => $this->connectSqlite($options),
             'mysql' => new PDO(
-                sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s', $c['host'] ?? '127.0.0.1', $c['port'] ?? 3306, $c['database'], $c['charset'] ?? 'utf8mb4'),
+                // A unix socket skips TCP when the database is on the same machine.
+                !empty($c['socket'])
+                    ? sprintf('mysql:unix_socket=%s;dbname=%s;charset=%s', $c['socket'], $c['database'], $c['charset'] ?? 'utf8mb4')
+                    : sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s', $c['host'] ?? '127.0.0.1', $c['port'] ?? 3306, $c['database'], $c['charset'] ?? 'utf8mb4'),
                 $c['username'] ?? null,
                 $c['password'] ?? null,
                 $options,
             ),
             'pgsql' => new PDO(
-                sprintf('pgsql:host=%s;port=%d;dbname=%s', $c['host'] ?? '127.0.0.1', $c['port'] ?? 5432, $c['database']),
+                // For Postgres the socket is the directory holding it, e.g. /var/run/postgresql.
+                sprintf('pgsql:host=%s;port=%d;dbname=%s', ($c['socket'] ?? '') ?: ($c['host'] ?? '127.0.0.1'), $c['port'] ?? 5432, $c['database']),
                 $c['username'] ?? null,
                 $c['password'] ?? null,
                 $options,

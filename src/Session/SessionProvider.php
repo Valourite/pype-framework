@@ -18,6 +18,7 @@ final class SessionProvider implements Provider
     {
         $app->container->singleton(SessionStore::class, fn ($c) => match ($app->config('session.driver', 'database')) {
             'database' => new DatabaseSessionStore($c->get(Connection::class), $app->config('session.table', 'sessions')),
+            'file' => new FileSessionStore($app->path($app->config('session.path', 'storage/sessions'))),
             'array' => new ArraySessionStore(),
             default => $c->get($app->config('session.driver')),   // a class name of your own store
         });
@@ -29,6 +30,7 @@ final class SessionProvider implements Provider
                 secure: (bool) $app->config('session.secure', false),
                 sameSite: $app->config('session.same_site', 'Lax'),
                 domain: $app->config('session.domain'),
+                touchSeconds: (int) $app->config('session.touch', 60),
             ),
             new VerifyCsrfToken(except: $app->config('session.csrf_except', [])),
             new FlashValidationErrors(),

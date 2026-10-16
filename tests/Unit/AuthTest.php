@@ -13,6 +13,7 @@ use Pype\Auth\Authenticate;
 use Pype\Database\Connection;
 use Pype\Stages\Throttle;
 use Pype\Testing\TestClient;
+use Pype\Tests\Support\TestDatabase;
 
 final class AuthTest extends TestCase
 {
@@ -23,8 +24,7 @@ final class AuthTest extends TestCase
     protected function setUp(): void
     {
         $this->app = new Application(__DIR__, ['auth' => ['user' => AuthUser::class]]);
-        $db = Connection::sqlite();
-        $db->statement((string) file_get_contents(__DIR__ . '/../fixtures/auth_schema.sql'));
+        $db = TestDatabase::withAuthTables();
         $this->app->container->instance(Connection::class, $db);
         $this->app->register(AuthProvider::class);
 

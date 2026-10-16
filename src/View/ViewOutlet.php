@@ -70,7 +70,7 @@ abstract class ViewOutlet extends Outlet implements ContainerAware
         $this->views = $container->get(Views::class);
     }
 
-    public function contentType(): string
+    public function contentType(Response $response): string
     {
         return 'text/html; charset=utf-8';
     }

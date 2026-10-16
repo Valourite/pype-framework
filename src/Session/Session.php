@@ -19,6 +19,9 @@ final class Session
     private const FLASH_OLD = '_flash.old';
     private const TOKEN = '_token';
 
+    /** When the store last saved this session (unix time). Kept by StartSession, hidden from all(). */
+    public const WRITTEN = '_written';
+
     /** @var list<string> ids replaced during this request, to delete from the store */
     private array $replaced = [];
 
@@ -70,7 +73,10 @@ final class Session
     /** @return array<string, mixed> */
     public function all(): array
     {
-        return $this->data;
+        $data = $this->data;
+        unset($data[self::WRITTEN]);
+
+        return $data;
     }
 
     public function put(string $key, mixed $value): self

@@ -6,6 +6,7 @@ namespace Pype\Testing;
 
 use Pype\Application;
 use Pype\Http\Request;
+use Pype\Http\UploadedFile;
 
 /**
  * Drive an Application in-process — no web server, no globals.
@@ -48,19 +49,20 @@ final class TestClient
         return $this->request('GET', $uri, [], $headers);
     }
 
-    public function post(string $uri, array $body = [], array $headers = []): TestResponse
+    /** @param array<string, UploadedFile|list<UploadedFile>> $files  sends a multipart form, like a browser */
+    public function post(string $uri, array $body = [], array $headers = [], array $files = []): TestResponse
     {
-        return $this->request('POST', $uri, $body, $headers);
+        return $this->request('POST', $uri, $body, $headers, $files);
     }
 
-    public function put(string $uri, array $body = [], array $headers = []): TestResponse
+    public function put(string $uri, array $body = [], array $headers = [], array $files = []): TestResponse
     {
-        return $this->request('PUT', $uri, $body, $headers);
+        return $this->request('PUT', $uri, $body, $headers, $files);
     }
 
-    public function patch(string $uri, array $body = [], array $headers = []): TestResponse
+    public function patch(string $uri, array $body = [], array $headers = [], array $files = []): TestResponse
     {
-        return $this->request('PATCH', $uri, $body, $headers);
+        return $this->request('PATCH', $uri, $body, $headers, $files);
     }
 
     public function delete(string $uri, array $headers = []): TestResponse
@@ -68,7 +70,7 @@ final class TestClient
         return $this->request('DELETE', $uri, [], $headers);
     }
 
-    public function request(string $method, string $uri, array $body = [], array $headers = []): TestResponse
+    public function request(string $method, string $uri, array $body = [], array $headers = [], array $files = []): TestResponse
     {
         $headers = [...$this->headers, ...$headers];
 
@@ -76,7 +78,7 @@ final class TestClient
             $headers['Cookie'] = $cookie;
         }
 
-        $request = Request::create($method, $uri, $body, $headers);
+        $request = Request::create($method, $uri, $body, $headers, $files);
         $response = $this->app->handle($request);
         $this->cookies->store($response->cookies());
 

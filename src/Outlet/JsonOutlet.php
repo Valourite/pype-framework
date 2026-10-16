@@ -24,7 +24,7 @@ class JsonOutlet extends Outlet
         return json_encode($this->payload($response), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 
-    public function contentType(): string
+    public function contentType(Response $response): string
     {
         return 'application/json; charset=utf-8';
     }

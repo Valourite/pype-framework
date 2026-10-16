@@ -16,10 +16,13 @@ use Pype\Database\Connection;
 use Pype\Http\Cookie;
 use Pype\Http\Request;
 use Pype\Http\Response;
+use Pype\Session\RedirectOnSuccess;
 use Pype\Session\Session;
 use Pype\Session\SessionProvider;
 use Pype\Session\SessionStore;
+use Pype\Stages\MethodOverride;
 use Pype\Testing\TestClient;
+use Pype\Tests\Support\TestDatabase;
 use Pype\Validation\Validate;
 use Pype\Validation\ValidatedInput;
 use Pype\View\View;
@@ -37,8 +40,7 @@ final class SessionTest extends TestCase
             'auth' => ['user' => AuthUser::class],
             'app' => ['views' => 'tests/fixtures/views'],
         ]);
-        $db = Connection::sqlite();
-        $db->statement((string) file_get_contents(__DIR__ . '/../fixtures/auth_schema.sql'));
+        $db = TestDatabase::withAuthTables();
         $this->app->container->instance(Connection::class, $db);
         $this->app->register(AuthProvider::class)->register(SessionProvider::class)->register(ViewProvider::class);
 
@@ -66,6 +68,8 @@ final class SessionTest extends TestCase
             ]);
             $r->post('/logout', [fn (Session $session, SessionGuard $guard) => $guard->logout($session)]);
             $r->get('/status', fn (Session $session) => ['status' => $session->get('status')]);
+            $r->post('/items', [new RedirectOnSuccess(fn (Response $res) => '/items/' . $res->data()['id']), fn () => ['id' => 7]]);
+            $r->delete('/items/{id}', [new RedirectOnSuccess('/items', 'Item deleted.'), fn (int $id) => ['deleted' => $id]]);
             $r->get('/counter', fn (Session $session) => ['n' => $session->put('n', $session->get('n', 0) + 1)->get('n')]);
             $r->get('/home', [new Authenticate(redirectTo: '/login'), fn (AuthUser $user) => ['hello' => $user->name]]);
         });
@@ -73,6 +77,7 @@ final class SessionTest extends TestCase
         $r->get('/api/me', ['auth', fn (AuthUser $user) => ['name' => $user->name]]);
         $r->get('/api/key', [new Authenticate(guards: [new HeaderGuard()]), fn (AuthUser $user) => ['name' => $user->name]]);
 
+        $this->app->through(new MethodOverride());
         $this->browser = new TestClient($this->app);
     }
 
@@ -184,6 +189,25 @@ final class SessionTest extends TestCase
         $this->assertSame('Ada', $this->browser->get('/api/key', ['X-User' => '1'])->json('data.name'));
     }
 
+    public function test_forms_can_send_delete_and_redirect_on_success(): void
+    {
+        $res = $this->browser->post('/items/3', ['_method' => 'delete', '_token' => $this->csrf()]);
+        $this->assertSame(303, $res->status());
+        $this->assertSame('/items', $res->header('Location'));
+        $this->assertSame('Item deleted.', $this->browser->get('/status')->json('data.status'));
+
+        $this->assertSame('/items/7', $this->browser->post('/items', ['_token' => $this->csrf()])->header('Location'));
+
+        // JSON clients get the data, not a redirect.
+        $json = $this->browser->post('/items/3', ['_method' => 'DELETE', '_token' => $this->csrf()], ['Accept' => 'application/json']);
+        $this->assertSame(['deleted' => 3], $json->json('data'));
+
+        // The override still needs the CSRF token, and only turns POST into PUT/PATCH/DELETE.
+        $this->assertSame(419, $this->browser->post('/items/3', ['_method' => 'DELETE'])->status());
+        $this->assertSame(405, $this->browser->post('/items/3', ['_method' => 'GET', '_token' => $this->csrf()])->status());
+        $this->assertSame(405, $this->browser->get('/items/3?_method=DELETE')->status());
+    }
+
     public function test_cookie_header_format(): void
     {
         $header = (new Cookie('theme', 'dark mode', maxAge: 60, secure: true))->toHeader();
@@ -194,6 +218,33 @@ final class SessionTest extends TestCase
 
         $request = Request::create('GET', '/', [], ['Cookie' => 'a=1; b=two%20words']);
         $this->assertSame(['a' => '1', 'b' => 'two words'], $request->cookies());
+    }
+
+    public function test_file_store(): void
+    {
+        $dir = sys_get_temp_dir() . '/pype-sessions-' . bin2hex(random_bytes(4));
+        $store = new \Pype\Session\FileSessionStore($dir);
+
+        $store->write('abc', ['n' => 1], 60);
+        $this->assertSame(['n' => 1], $store->read('abc'));
+        $this->assertSame([], glob("{$dir}/abc*"));          // stored under a hash, not the id
+        $this->assertNull($store->read('nope'));
+
+        $store->write('old', ['n' => 2], -1);
+        $this->assertNull($store->read('old'));                // expired
+        $this->assertSame(1, $store->gc());
+        $this->assertSame(['n' => 1], $store->read('abc'));
+
+        // A second sweep within a minute is skipped.
+        $store->write('old2', ['n' => 3], -1);
+        $this->assertSame(0, $store->gc());
+        @unlink("{$dir}/.gc");
+        $this->assertSame(1, $store->gc());
+
+        $store->destroy('abc');
+        $this->assertNull($store->read('abc'));
+        @unlink("{$dir}/.gc");
+        rmdir($dir);
     }
 
     public function test_session_store_is_swappable(): void
@@ -210,5 +261,47 @@ final class HeaderGuard implements Guard
         $id = $request->header('x-user');
 
         return $id === null ? null : new AuthUser((int) $id, 'Ada', 'ada@x.test');
+    }
+
+    public function test_unchanged_sessions_are_only_resaved_to_slide_the_expiry(): void
+    {
+        $store = new \Pype\Session\ArraySessionStore();
+        $app = new Application(__DIR__);
+        $app->container->instance(SessionStore::class, $store);
+        $app->router->group('/', [new \Pype\Session\StartSession(gcChance: 0, touchSeconds: 60)], function ($r) {
+            $r->get('/read', fn (Session $session) => ['n' => $session->get('n')]);
+            $r->get('/put', fn (Session $session) => ['n' => $session->put('n', 1)->get('n')]);
+            $r->get('/flash', fn (Session $session) => ['ok' => (bool) $session->flash('status', 'Saved')]);
+            $r->get('/all', fn (Session $session) => $session->all());
+        });
+        $client = new TestClient($app);
+
+        $client->get('/read');
+        $this->assertSame(1, $store->writes, 'a new session is saved');
+
+        $client->get('/read');
+        $client->get('/read');
+        $this->assertSame(1, $store->writes, 'nothing changed: no write');
+
+        $client->get('/put');
+        $this->assertSame(2, $store->writes, 'data changed');
+        $client->get('/put');
+        $this->assertSame(2, $store->writes, 'same value again: no write');
+
+        $client->get('/flash');
+        $this->assertSame(3, $store->writes);
+        $this->assertSame('Saved', $client->get('/all')->json('data.status'));
+        $this->assertSame(4, $store->writes, 'the flash ages out: write');
+        $this->assertArrayNotHasKey('status', $client->get('/all')->json('data'));
+        $this->assertArrayNotHasKey(Session::WRITTEN, $client->get('/all')->json('data'));
+        $this->assertSame(4, $store->writes);
+
+        // Pretend the last save was a minute ago: the next request slides the expiry.
+        $id = $client->cookies()->get('pype_session');
+        $data = $store->read($id);
+        $store->write($id, [...$data, Session::WRITTEN => time() - 60], 7200);
+        $client->get('/read');
+        $this->assertSame(6, $store->writes);
+        $this->assertGreaterThanOrEqual(time() - 1, $store->read($id)[Session::WRITTEN]);
     }
 }

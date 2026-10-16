@@ -10,6 +10,9 @@ final class ArraySessionStore implements SessionStore
     /** @var array<string, array{data: array<string, mixed>, expires: int}> */
     private array $sessions = [];
 
+    /** How many times write() was called (handy in tests). */
+    public int $writes = 0;
+
     public function read(string $id): ?array
     {
         $session = $this->sessions[$id] ?? null;
@@ -19,6 +22,7 @@ final class ArraySessionStore implements SessionStore
 
     public function write(string $id, array $data, int $lifetimeSeconds): void
     {
+        $this->writes++;
         $this->sessions[$id] = ['data' => $data, 'expires' => time() + $lifetimeSeconds];
     }
 

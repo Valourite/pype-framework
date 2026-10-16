@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pype\Http;
 
+use Pype\Exceptions\HttpException;
+use Pype\Outlet\FileOutlet;
 use Pype\Outlet\Outlet;
 
 /**
@@ -47,6 +49,25 @@ final class Response
         return new self(null, $status, ['Location' => $url]);
     }
 
+    /**
+     * Send a file from disk. inline: show it in the browser (images, PDFs); otherwise download.
+     * $name is the file name the browser sees, not a path.
+     */
+    public static function file(string $path, ?string $name = null, bool $inline = true): self
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            throw HttpException::notFound('File not found');
+        }
+
+        $name = str_replace(['"', '\\', "\r", "\n"], '', $name ?? basename($path));
+
+        return (new self($path, 200, [
+            'Content-Disposition' => sprintf('%s; filename="%s"', $inline ? 'inline' : 'attachment', $name),
+            'Content-Length' => (string) filesize($path),
+            'X-Content-Type-Options' => 'nosniff',
+        ]))->withOutlet(new FileOutlet());
+    }
+
     public static function noContent(): self
     {
         return new self(null, 204);
@@ -63,12 +84,13 @@ final class Response
 
     /**
      * Normalise whatever a stage returned:
-     *   Response → as-is,  null → 204,  anything else → 200 with that data.
+     *   Response → as-is,  Responsable → its response,  null → 204,  anything else → 200 with that data.
      */
     public static function from(mixed $result): self
     {
         return match (true) {
             $result instanceof self => $result,
+            $result instanceof Responsable => $result->toResponse(),
             $result === null => self::noContent(),
             default => self::make($result),
         };
@@ -178,7 +200,7 @@ final class Response
     /** The Content-Type the client receives: an explicit header, else the outlet's. */
     public function contentType(): ?string
     {
-        return $this->header('Content-Type') ?? $this->outlet?->contentType();
+        return $this->header('Content-Type') ?? $this->outlet?->contentType($this);
     }
 
     /** Render the body using the attached outlet (computed once). */

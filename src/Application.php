@@ -44,6 +44,9 @@ final class Application
     /** @var list<array{0: class-string<Throwable>, 1: Closure}> */
     private array $renderers = [];
 
+    /** @var array<string, array{0: string, 1: string|Closure}> */
+    private array $commands = [];
+
     /**
      * @param array<string, mixed> $config  keyed by file name: ['app' => [...], 'database' => [...]]
      */
@@ -160,6 +163,28 @@ final class Application
         return $this;
     }
 
+    /**
+     * Add a `php bin/pype <name>` command. The handler is a closure or an invokable class,
+     * with parameters injected like a stage's: Pype\Console\Input for the arguments, plus
+     * any service. Return an exit code (null = 0).
+     *
+     *   $app->command('expenses:recur', 'Create due recurring expenses', RecurExpenses::class);
+     *
+     * @param class-string|Closure $handler
+     */
+    public function command(string $name, string $description, string|Closure $handler): self
+    {
+        $this->commands[$name] = [$description, $handler];
+
+        return $this;
+    }
+
+    /** @return array<string, array{0: string, 1: string|Closure}> */
+    public function commands(): array
+    {
+        return $this->commands;
+    }
+
     /** Load a routes file; the file receives $router (and $app) in scope. */
     public function routes(string $file): self
     {
@@ -191,6 +216,10 @@ final class Application
             $this->report($e, $request);
             $response = $this->defaultRender($e)->withOutlet(new JsonOutlet());
         }
+
+        // Don't hold on to the request: in a long-running server the next one replaces it,
+        // and until then it would keep its body and upload temp files alive.
+        $this->container->forget(Request::class);
 
         return $response;
     }

@@ -43,6 +43,18 @@ final class Container implements ContainerInterface
         $this->instances[$id] = $instance;
     }
 
+    /** Whether $id has already been built (or set with instance()). */
+    public function resolved(string $id): bool
+    {
+        return array_key_exists($id, $this->instances);
+    }
+
+    /** Drop a resolved instance (bindings stay). */
+    public function forget(string $id): void
+    {
+        unset($this->instances[$id]);
+    }
+
     public function has(string $id): bool
     {
         return isset($this->instances[$id]) || isset($this->bindings[$id]) || class_exists($id);

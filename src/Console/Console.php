@@ -7,7 +7,9 @@ namespace Pype\Console;
 use Closure;
 use Pype\Application;
 use Pype\Database\Migrator;
+use Pype\Pipeline\Invoker;
 use Pype\Routing\Router;
+use Pype\Server\SwooleServer;
 
 /**
  * Minimal CLI: `php bin/pype <command> [args]`.
@@ -20,15 +22,29 @@ final class Console
     public function __construct(private readonly Application $app)
     {
         $this->commands = [
-            'serve' => ['Start the dev server [--port=8000] [--host=localhost]', $this->serve(...)],
+            'serve' => ['Start the server [--port=8000] [--host=localhost] [--server=fpm|swoole] [--workers=N]', $this->serve(...)],
             'routes' => ['List routes and their compiled pipelines', $this->routes(...)],
             'make:stage' => ['Create app/Stages/<Name>.php', fn (array $a) => $this->make('Stages', $a[0] ?? null, 'stage')],
             'make:outlet' => ['Create app/Outlets/<Name>.php', fn (array $a) => $this->make('Outlets', $a[0] ?? null, 'outlet')],
             'make:provider' => ['Create app/Providers/<Name>.php', fn (array $a) => $this->make('Providers', $a[0] ?? null, 'provider')],
-            'make:migration' => ['Create database/migrations/<timestamp>_<name>.sql', $this->makeMigration(...)],
-            'migrate' => ['Run pending SQL migrations', $this->migrate(...)],
+            'make:command' => ['Create app/Commands/<Name>.php (register it in a provider)', fn (array $a) => $this->make('Commands', $a[0] ?? null, 'command')],
+            'make:migration' => ['Create database/migrations/<timestamp>_<name>.php [--sql for plain SQL]', $this->makeMigration(...)],
+            'migrate' => ['Run pending migrations', $this->migrate(...)],
             'migrate:status' => ['Show which migrations have run', $this->migrateStatus(...)],
         ];
+
+        foreach ($app->commands() as $name => [$description, $handler]) {
+            $this->commands[$name] = [$description, fn (array $args) => $this->runAppCommand($handler, $args)];
+        }
+    }
+
+    /** @param class-string|Closure $handler */
+    private function runAppCommand(string|Closure $handler, array $args): int
+    {
+        $callable = is_string($handler) ? $this->app->container->get($handler) : $handler;
+        $result = (new Invoker($this->app->container))->call($callable, new Input($args), static fn () => null);
+
+        return is_int($result) ? $result : 0;
     }
 
     /** @param list<string> $argv */
@@ -51,7 +67,7 @@ final class Console
 
         echo "pype — available commands:\n\n";
         foreach ($this->commands as $name => [$description]) {
-            printf("  %-16s %s\n", $name, $description);
+            printf("  %-18s %s\n", $name, $description);
         }
 
         return $unknown === null ? 0 : 1;
@@ -60,6 +76,19 @@ final class Console
     private function serve(array $args): int
     {
         $opts = $this->options($args);
+
+        // APP_SERVER=swoole: a long-running OpenSwoole server (the app boots once).
+        if (($opts['server'] ?? $this->app->config('app.server', 'fpm')) === 'swoole') {
+            $workers = $opts['workers'] ?? $this->app->config('app.swoole.workers');
+            (new SwooleServer($this->app, $opts['host'] ?? '0.0.0.0', (int) ($opts['port'] ?? 8000), [
+                'worker_num' => $workers === null || $workers === '' ? null : (int) $workers,
+                'max_request' => $this->app->config('app.swoole.max_request'),
+            ]))->start();
+
+            return 0;
+        }
+
+        // Otherwise PHP's built-in server for development; production runs behind nginx + PHP-FPM.
         $address = ($opts['host'] ?? 'localhost') . ':' . ($opts['port'] ?? '8000');
 
         echo "pype serving on http://{$address}\n";
@@ -112,7 +141,8 @@ final class Console
 
     private function makeMigration(array $args): int
     {
-        $name = $args[0] ?? '';
+        $sql = in_array('--sql', $args, true);
+        $name = array_values(array_filter($args, static fn (string $a) => !str_starts_with($a, '--')))[0] ?? '';
 
         if (!preg_match('/^[a-z][a-z0-9_]*$/', $name)) {
             fwrite(STDERR, "Give a snake_case name, e.g. make:migration create_posts_table\n");
@@ -121,13 +151,48 @@ final class Console
         }
 
         $dir = $this->app->path($this->app->config('database.migrations', 'database/migrations'));
-        $file = date('Y_m_d_His') . "_{$name}.sql";
+        $file = date('Y_m_d_His') . "_{$name}." . ($sql ? 'sql' : 'php');
 
         @mkdir($dir, 0777, true);
-        file_put_contents("{$dir}/{$file}", "-- {$name}\n\n");
+        file_put_contents("{$dir}/{$file}", $sql ? "-- {$name}\n\n" : $this->migrationStub($name));
         echo "Created {$file}\n";
 
         return 0;
+    }
+
+    private function migrationStub(string $name): string
+    {
+        if (preg_match('/^create_(\w+)_table$/', $name, $m)) {
+            $body = <<<PHP
+                        \$schema->create('{$m[1]}', function (Table \$t) {
+                            \$t->id();
+                            \$t->timestamps();
+                        });
+                PHP;
+        } else {
+            $table = preg_match('/_(?:to|from|in)_(\w+?)(?:_table)?$/', $name, $m) ? $m[1] : 'table_name';
+            $body = <<<PHP
+                        \$schema->table('{$table}', function (Table \$t) {
+                            //
+                        });
+                PHP;
+        }
+
+        return <<<PHP
+            <?php
+
+            use Pype\\Database\\Schema\\Migration;
+            use Pype\\Database\\Schema\\Schema;
+            use Pype\\Database\\Schema\\Table;
+
+            return new class extends Migration {
+                public function up(Schema \$schema): void
+                {
+            {$body}
+                }
+            };
+
+            PHP;
     }
 
     private function make(string $dir, ?string $name, string $kind): int
@@ -176,14 +241,40 @@ final class Console
 
                 final class {$class} extends Outlet
                 {
+                    /** Turn the pipeline's result (or error) into the response body. */
                     public function render(Response \$response, Request \$request): string
                     {
-                        return (string) json_encode(\$response->isError() ? \$response->errorDetails() : \$response->data());
+                        if (\$response->isError()) {
+                            return \$response->errorDetails()['message'];
+                        }
+
+                        \$data = \$response->data();
+
+                        return is_scalar(\$data) || \$data instanceof \\Stringable ? (string) \$data : print_r(\$data, true);
                     }
 
-                    public function contentType(): string
+                    public function contentType(Response \$response): string
                     {
                         return 'text/plain; charset=utf-8';
+                    }
+                }
+                PHP,
+            'command' => <<<PHP
+                use Pype\Console\Input;
+
+                /**
+                 * Register in a provider:
+                 *   \$app->command('app:{$this->kebab($class)}', 'What it does', {$class}::class);
+                 *
+                 * Parameters are injected: Input for the arguments, plus any service (Connection, ...).
+                 */
+                final class {$class}
+                {
+                    public function __invoke(Input \$input): int
+                    {
+                        echo "Hello from {$class}\\n";
+
+                        return 0;
                     }
                 }
                 PHP,
@@ -204,6 +295,11 @@ final class Console
     }
 
     /** @return array<string, string> */
+    private function kebab(string $class): string
+    {
+        return strtolower((string) preg_replace('/(?<!^)[A-Z]/', '-$0', $class));
+    }
+
     private function options(array $args): array
     {
         $opts = [];

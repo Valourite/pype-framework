@@ -23,9 +23,10 @@ final class Request
      * @param array<string, mixed>  $body
      * @param array<string, string> $headers  lower-cased header names
      * @param array<string, string> $cookies
+     * @param array<string, UploadedFile|list<UploadedFile>> $files
      */
     public function __construct(
-        private readonly string $method,
+        private string $method,
         private readonly string $path,
         private readonly array $query = [],
         private readonly array $body = [],
@@ -33,6 +34,7 @@ final class Request
         private readonly string $rawBody = '',
         private readonly string $ip = '127.0.0.1',
         private readonly array $cookies = [],
+        private readonly array $files = [],
     ) {
         $this->context = new Context();
     }
@@ -42,8 +44,9 @@ final class Request
      *
      * @param array<string, mixed>  $body
      * @param array<string, string> $headers
+     * @param array<string, UploadedFile|list<UploadedFile>> $files  e.g. ['receipt' => UploadedFile::fake($path)]
      */
-    public static function create(string $method, string $uri, array $body = [], array $headers = []): self
+    public static function create(string $method, string $uri, array $body = [], array $headers = [], array $files = []): self
     {
         $parts = parse_url($uri);
         parse_str($parts['query'] ?? '', $query);
@@ -51,11 +54,15 @@ final class Request
         $headers = array_change_key_case($headers, CASE_LOWER);
         $raw = $body === [] ? '' : json_encode($body, JSON_THROW_ON_ERROR);
 
-        if ($raw !== '') {
+        if ($files !== []) {
+            // Like a browser: multipart form, no JSON body.
+            $raw = '';
+            $headers['content-type'] ??= 'multipart/form-data; boundary=pype';
+        } elseif ($raw !== '') {
             $headers['content-type'] ??= 'application/json';
         }
 
-        return new self(strtoupper($method), $parts['path'] ?? '/', $query, $body, $headers, $raw, cookies: self::parseCookies($headers['cookie'] ?? ''));
+        return new self(strtoupper($method), $parts['path'] ?? '/', $query, $body, $headers, $raw, cookies: self::parseCookies($headers['cookie'] ?? ''), files: $files);
     }
 
     public static function fromGlobals(): self
@@ -70,12 +77,7 @@ final class Request
         }
 
         $raw = (string) file_get_contents('php://input');
-        $body = $_POST;
-
-        if ($raw !== '' && preg_match('#^application/(.+\+)?json#i', $headers['content-type'] ?? '')) {
-            $decoded = json_decode($raw, true);
-            $body = is_array($decoded) ? $decoded : [];
-        }
+        $body = self::bodyFrom($raw, $headers['content-type'] ?? '', $_POST);
 
         $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
@@ -88,7 +90,54 @@ final class Request
             rawBody: $raw,
             ip: (string) ($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1'),
             cookies: array_filter($_COOKIE, 'is_string'),
+            files: self::normaliseFiles($_FILES),
         );
+    }
+
+    /**
+     * The parsed body: decoded JSON for JSON requests, otherwise the form fields.
+     *
+     * @param array<string, mixed> $form
+     * @return array<mixed>
+     */
+    public static function bodyFrom(string $raw, string $contentType, array $form): array
+    {
+        if ($raw !== '' && preg_match('#^application/(.+\+)?json#i', $contentType)) {
+            $decoded = json_decode($raw, true);
+
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        return $form;
+    }
+
+    /**
+     * $_FILES-shaped array → UploadedFile objects. "receipts[]" fields become lists; empty file
+     * inputs (the browser sends one with UPLOAD_ERR_NO_FILE) are left out. $trusted is for
+     * servers that write their own temp files (OpenSwoole), which is_uploaded_file() rejects.
+     *
+     * @return array<string, UploadedFile|list<UploadedFile>>
+     */
+    public static function normaliseFiles(array $files, bool $trusted = false): array
+    {
+        $result = [];
+
+        foreach ($files as $field => $f) {
+            if (!is_array($f['error'] ?? null)) {
+                if (($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+                    $result[$field] = new UploadedFile($f['tmp_name'], $f['name'], $f['type'] ?? '', (int) $f['size'], (int) $f['error'], $trusted);
+                }
+                continue;
+            }
+
+            foreach (array_keys($f['error']) as $i) {
+                if (is_int($f['error'][$i]) && $f['error'][$i] !== UPLOAD_ERR_NO_FILE) {
+                    $result[$field][] = new UploadedFile($f['tmp_name'][$i], $f['name'][$i], $f['type'][$i] ?? '', (int) $f['size'][$i], $f['error'][$i], $trusted);
+                }
+            }
+        }
+
+        return $result;
     }
 
     /** @return array<string, string> */
@@ -112,6 +161,15 @@ final class Request
         return $this->method;
     }
 
+    /** A copy with another HTTP method. It shares this request's context, params and input. */
+    public function withMethod(string $method): self
+    {
+        $clone = clone $this;
+        $clone->method = strtoupper($method);
+
+        return $clone;
+    }
+
     public function path(): string
     {
         return '/' . trim($this->path, '/');
@@ -125,6 +183,18 @@ final class Request
     public function input(?string $key = null, mixed $default = null): mixed
     {
         return $key === null ? $this->body : ($this->body[$key] ?? $default);
+    }
+
+    /** An uploaded file (or list, for name="field[]" inputs), or null. */
+    public function file(string $key): UploadedFile|array|null
+    {
+        return $this->files[$key] ?? null;
+    }
+
+    /** @return array<string, UploadedFile|list<UploadedFile>> */
+    public function files(): array
+    {
+        return $this->files;
     }
 
     public function header(string $name, ?string $default = null): ?string
