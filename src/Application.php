@@ -30,6 +30,9 @@ use Throwable;
  */
 final class Application
 {
+    /** Where `bin/pype optimize` writes the compiled route tables. */
+    public const ROUTE_CACHE = 'bootstrap/cache/routes.php';
+
     public readonly Container $container;
     public readonly Router $router;
 
@@ -61,6 +64,7 @@ final class Application
         $this->container->instance(Container::class, $this->container);
         $this->container->instance(ContainerInterface::class, $this->container);
         $this->container->instance(Router::class, $this->router);
+        $this->router->cacheFrom($this->path(self::ROUTE_CACHE));   // read lazily, only if `optimize` wrote it
 
         foreach ($this->config('app.providers', []) as $provider) {
             $this->register($provider);

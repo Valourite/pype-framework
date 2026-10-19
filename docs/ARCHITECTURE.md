@@ -68,6 +68,30 @@ Built in: `JsonOutlet` (`{"data": …}` / `{"error": …}`), `View` / `ViewOutle
 `FileOutlet` (downloads, used by `Response::file()`). Write your own by implementing `render()`
 and `contentType()`.
 
+## Route matching
+
+`Router::resolve()`:
+
+1. **Static paths** (no `{param}`) are a hash lookup, `isset($static[$path][$method])`.
+2. **Paths with params** are combined into regexes of up to 50 patterns each, every alternative
+   tagged `(*MARK:n)`, so one `preg_match` finds the pattern. Routes that differ only in param
+   names share a pattern; the method picks the route.
+3. Building those regexes costs more than one plain scan, so a Router's **first** lookup scans
+   the routes in order (that's every request under PHP-FPM) and later lookups use the compiled
+   regexes (a long-running server compiles once).
+4. `bin/pype optimize` writes both tables to `bootstrap/cache/routes.php` with a signature of the
+   routes (method + path, in order). opcache keeps that file in memory, so FPM skips building.
+   A stale file (routes changed) is ignored, never trusted.
+5. Wrong method (405), and patterns that can match the same path (`/a/{x}` and `/{y}/b`), go
+   to the plain scan, so the answer is always the registration-order one.
+
+Precedence: a static path beats a param pattern (`/users/new` over `/users/{id}`) regardless
+of registration order. Otherwise the first registered route wins.
+
+Measured (2026-10-19, worst-case route): a lookup on a long-running server takes 0.4 µs (30
+routes) to 1.5 µs (500); the old plain scan took 2.3–33 µs, FastRoute 0.3–2.7 µs. Under PHP-FPM
+with `optimize`, routing adds ~1–4 µs on top of registering the routes.
+
 ## Stacks
 
 Named lists of stages registered by providers or apps: `$app->stack('web', [...])`, used in

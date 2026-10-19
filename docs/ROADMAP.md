@@ -14,6 +14,10 @@ anything big.
   - file sessions (written only when changed); rate-limit drivers (database/APCu);
   - PHP schema builder; SQLite/MySQL/Postgres tested;
   - app CLI commands; OpenSwoole server (`APP_SERVER=swoole`).
+- **Unreleased**: faster route matching (hash for static paths, combined `(*MARK)` regexes for
+  params) and `bin/pype optimize` (compiled route tables). Config caching was measured and
+  skipped: loading config + `.env` takes ~11 µs, a cached config file wasn't faster. Details in
+  `ARCHITECTURE.md` under "Route matching".
 
 ## Tier 1: almost every app needs these
 
@@ -48,22 +52,6 @@ A built-in, opt-in page that shows log entries live as the app runs, with filter
 
 ## Tier 2: speed and growing apps
 
-- **Faster route matching**, keeping pype's Router API: a hash lookup for routes without
-  parameters, and one combined regex with PCRE `(*MARK)` for the rest. Measured 2026-10-19,
-  worst case:
-
-  | Routes | pype match | FastRoute match | pype build + match | FastRoute build + match |
-  |---|---|---|---|---|
-  | 30 | 2.3 µs | 0.3 µs | 16 µs | 30 µs |
-  | 150 | 10 µs | 0.9 µs | 77 µs | 290 µs |
-  | 500 | 33 µs | 2.7 µs | 252 µs | 2,347 µs |
-
-  FastRoute matches ~10× faster (one combined regex) but is slow to build its table. pype's
-  linear scan builds fast but matches slowly. Doing both natively gets the best of each, with no
-  dependency.
-- `bin/pype optimize`: compile routes (including the matching table above) and config to a PHP
-  file that opcache keeps in memory, so PHP-FPM stops rebuilding routes and reading `.env` on
-  every request.
 - Database-backed job queue + `queue:work` (`pcntl`); `schedule:run` for cron.
 - Seeders and test factories; migration rollback (`down()`); multiple database connections.
 - Thin HTTP client (curl). Translations (`intl` `MessageFormatter`).
@@ -103,14 +91,14 @@ the problem is security-sensitive, dev-only, or an interop interface.
 | Component | Decision | Why |
 |---|---|---|
 | Pipeline, stages, outlets | ours | pype's core idea; PSR-15 is one fixed middleware chain, not a stage list per route |
-| Router | ours, faster matching (Tier 2) | packages only map URL → handler; pype's routes carry stages, groups, stacks and outlets |
+| Router | ours, with fast matching (done) | packages only map URL → handler; pype's routes carry stages, groups, stacks and outlets |
 | Container | ours | autowiring is all pype needs; PHP-DI is much bigger and needs compiling to be fast |
 | Request / Response | ours | PSR-7 copies objects on every change; HttpFoundation is a large dependency. Optional PSR-7 converters later for interop (RoadRunner) |
 | Sessions | ours | PHP's native `session_*` uses global state and sends its own headers; breaks OpenSwoole |
 | Query builder | ours | PDO directly is as fast as it gets; an ORM conflicts with the principles |
 | Migrations | ours (done) | runs only at deploy, so a package would cost nothing per request, but Phinx/Doctrine add many dependencies to every app. Revisit only for mature rollback/seeding |
 | Validation | ours, extend | built on `filter_var`; alternatives are far bigger for the same rules |
-| `.env` | ours | 61 lines; production should use the config cache (`optimize`) anyway |
+| `.env` | ours | 61 lines; loading `.env` + config takes ~11 µs, so no config cache is needed (measured) |
 | Templates | plain PHP | fastest; existing engines may come as an opt-in outlet (Tier 3) |
 | Console | ours | CLI-only so no request cost either way; symfony/console would add packages to every app |
 | Mail | **package** behind our interface | SMTP/MIME are security-sensitive |

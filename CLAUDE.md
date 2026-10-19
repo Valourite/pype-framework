@@ -36,7 +36,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 |---|---|
 | `src/Application.php` | lifecycle: config, providers, global stages, `handle()`, error rendering |
 | `src/Pipeline/` | `Stage` interface, `Pipeline`, `Invoker` (fills closure/invokable params by type and name) |
-| `src/Routing/` | `Router` (groups, named stacks, outlet hoisting in `compile()`), `Route` |
+| `src/Routing/` | `Router` (groups, named stacks, outlet hoisting in `compile()`, fast matching + `optimize` cache), `Route` |
 | `src/Http/` | `Request`, `Response`, `Context`, `Cookie`, `UploadedFile`, `Responsable` |
 | `src/Outlet/` | `Outlet` (abstract stage), `JsonOutlet`, `FileOutlet` |
 | `src/View/` | plain-PHP templates: `View`, `ViewOutlet` (class-based views), `Template`, `Views` |
@@ -79,6 +79,9 @@ symlinks this checkout into the app's `vendor/`.
   applied to the stored copy (`Session::dataToStore()`), not the live session.
 - **Outlets are hoisted** to the front of a stage list by `Router::compile()` so they wrap
   everything; the innermost wins (route > group > global > app default).
+- **Route matching** (see ARCHITECTURE "Route matching"): static paths beat `{param}` patterns;
+  a Router's first lookup scans, later ones use compiled regexes; overlapping patterns always go
+  through the scan so answers never depend on which path was taken. Keep `RouterTest` green.
 - Exceptions are caught per stage inside the pipeline, so outer stages always see a `Response`.
 - **SQLite transactions use `BEGIN IMMEDIATE`** (`Connection::sqliteTransaction`): a plain
   BEGIN fails with "database is locked" when it upgrades to a write under concurrency. PDO

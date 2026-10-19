@@ -70,6 +70,34 @@ final class ConsoleTest extends TestCase
         rmdir("{$base}/app");
         rmdir($base);
     }
+
+    public function test_optimize_writes_route_tables_the_app_then_uses(): void
+    {
+        $base = sys_get_temp_dir() . '/pype-optimize-' . bin2hex(random_bytes(4));
+        mkdir($base);
+        $boot = function () use ($base): Application {
+            $app = new Application($base);
+            $app->router->get('/posts/{id}', fn (int $id) => ['id' => $id]);
+            $app->router->get('/about', fn () => ['page' => 'about']);
+
+            return $app;
+        };
+
+        [$code, $out] = $this->console($boot(), 'optimize');
+        $this->assertSame(0, $code);
+        $this->assertStringContainsString('Compiled 2 routes', $out);
+        $this->assertFileExists($base . '/' . Application::ROUTE_CACHE);
+
+        $client = new \Pype\Testing\TestClient($boot());
+        $this->assertSame(5, $client->get('/posts/5')->json('data.id'));
+        $this->assertSame('about', $client->get('/about')->json('data.page'));
+
+        $this->console($boot(), 'optimize:clear');
+        $this->assertFileDoesNotExist($base . '/' . Application::ROUTE_CACHE);
+        rmdir("{$base}/bootstrap/cache");
+        rmdir("{$base}/bootstrap");
+        rmdir($base);
+    }
 }
 
 final class GreetFailing

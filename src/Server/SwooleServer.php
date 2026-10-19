@@ -48,6 +48,7 @@ final class SwooleServer
         $server = new $class($this->host, $this->port);
         $settings = $this->settings();
         $server->set($settings);
+        $this->app->router->warm();   // built once here; every forked worker inherits the tables
 
         $server->on('start', function () use ($settings) {
             printf("pype serving on http://%s:%d with OpenSwoole (%d workers). Code changes need a restart.\n", $this->host, $this->port, $settings['worker_num']);
