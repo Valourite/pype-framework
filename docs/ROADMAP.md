@@ -20,6 +20,10 @@ anything big.
   `ARCHITECTURE.md` under "Route matching". Also named routes with group prefixes, `url()` /
   `Urls`, signed URLs (`signed_url()`, `ValidateSignature`, `APP_KEY` + `key:generate`), names in
   `bin/pype routes`.
+- **Unreleased**: validation rules: `unique`/`exists` (+ `Unique`/`Exists` objects, `{param}`
+  from the route), dates (`before`/`after`...), `items.*` wildcards and dot paths, `required_if`/
+  `required_with`, `regex`, `same`/`different`, `between`, `digits`, `alpha*`, `uuid`, `ip`, `json`,
+  `accepted`, `not_in`; closures get `($value, $field, $data)`; `Rule` interface; custom messages.
 - **0.4.0**: logging (PSR-3 `Logger`, JSON lines, request log, forwarding to stderr/syslog/any PSR-3 logger), the live log viewer, the
   development error page, `HtmlOutlet`.
 
@@ -27,7 +31,6 @@ anything big.
 
 | Feature | Built on | Notes |
 |---|---|---|
-| More validation rules: `regex`, `unique`/`exists`, `before`/`after`, `items.*`, closure rules, custom messages | `preg_match`, `filter_var`, query builder | Most common hand-written app code |
 | Cache: `remember($key, $ttl, fn)`; APCu / file / array | `apcu_*`, `var_export` + opcache | Same driver pattern as sessions and rate limits. Implement **PSR-16** (`psr/simple-cache`, interfaces only) |
 | Encryption; "remember me" cookie guard | `sodium_crypto_secretbox` | Uses `APP_KEY` (exists since 0.3) |
 | Mail: `Mailer` interface; log driver + an SMTP driver | **a package**: PHPMailer (0 deps) or symfony/mailer | Don't write SMTP/MIME ourselves: security-sensitive and easy to get wrong. pype owns the small interface, the driver wraps the package (optional, composer `suggest`) |

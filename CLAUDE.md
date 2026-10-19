@@ -97,6 +97,9 @@ symlinks this checkout into the app's `vendor/`.
   unregistered in production unless guarded by stages.
 - App test suites set `LOG_PATH=storage/logs/testing` and `LOG_REQUESTS=false` (phpunit.xml) so
   test runs don't fill the app's log.
+- `Validate` keeps `$rules`/`$messages` as plain properties with defaults: apps subclass it with
+  their own constructor and never call parent's. Rule objects in routes are shared by all
+  requests, so `DatabaseRule::using()` returns a copy instead of storing the connection.
 - Exceptions are caught per stage inside the pipeline, so outer stages always see a `Response`.
 - **SQLite transactions use `BEGIN IMMEDIATE`** (`Connection::sqliteTransaction`): a plain
   BEGIN fails with "database is locked" when it upgrades to a write under concurrency. PDO
