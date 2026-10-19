@@ -21,17 +21,49 @@ anything big.
 |---|---|---|
 | URL generation from named routes; signed URLs (with expiry) | `http_build_query`, `hash_hmac` | `Route::name()` exists, nothing uses it yet. Needed by the next items |
 | More validation rules: `regex`, `unique`/`exists`, `before`/`after`, `items.*`, closure rules, custom messages | `preg_match`, `filter_var`, query builder | Most common hand-written app code |
-| Logger: levels, daily file, request id | `file_put_contents(FILE_APPEND\|LOCK_EX)` | Only `error_log` today (`Exceptions\ErrorLogReporter`) |
-| Cache: `remember($key, $ttl, fn)`; APCu / file / array | `apcu_*`, `var_export` + opcache | Same driver pattern as sessions and rate limits |
+| Logger: levels, daily file, request id; **log viewer page** (see below) | `file_put_contents(FILE_APPEND\|LOCK_EX)` | Implement the **PSR-3** interface (`psr/log`, interfaces only), so Monolog can be dropped in. Only `error_log` today (`Exceptions\ErrorLogReporter`) |
+| Cache: `remember($key, $ttl, fn)`; APCu / file / array | `apcu_*`, `var_export` + opcache | Same driver pattern as sessions and rate limits. Implement **PSR-16** (`psr/simple-cache`, interfaces only) |
 | Encryption; "remember me" cookie guard | `sodium_crypto_secretbox` | Needs an `APP_KEY` |
-| Mail: `Mailer` interface; SMTP + log drivers | `stream_socket_client` | |
+| Mail: `Mailer` interface; log driver + an SMTP driver | **a package**: PHPMailer (0 deps) or symfony/mailer | Don't write SMTP/MIME ourselves: security-sensitive and easy to get wrong. pype owns the small interface, the driver wraps the package (optional, composer `suggest`) |
 | Password reset; email verification | the above | |
-| Development error page (trace + source) | `debug_backtrace` | Today a dev crash is a bare JSON error |
+| Development error page (trace + source) | **a package**: filp/whoops, dev-only | Costs nothing in production (require-dev). Today a dev crash is a bare JSON error |
+
+### Log viewer
+
+A built-in, opt-in page that shows log entries live as the app runs, with filters.
+
+- **Off by default.** Enabled in config (e.g. `log.viewer => true` plus a path such as
+  `/_pype/logs`), registered by a provider like any other routes. It must sit behind a stage the
+  app chooses (e.g. `'auth'` plus an admin check), and refuse to load when `APP_DEBUG=false`
+  unless explicitly allowed. Logs leak secrets.
+- **Live updates** with Server-Sent Events: the page opens an `EventSource`, the endpoint tails
+  the log file (`fopen` + `fseek` to the last offset, `fgets`), and streams new lines. Polling
+  (`?after=<offset>`) is the fallback. Note: under PHP-FPM and OpenSwoole (no coroutines) an open
+  stream holds one worker, so cap open viewers and stream duration, and reconnect.
+- **Filters:** level (debug…emergency), request id (click one to see a whole request), text
+  search, time range. Entries are one JSON object per line (`json_encode`), so filtering is a
+  cheap line scan with no parsing library.
+- **Speed:** the logger itself is an append with `LOCK_EX`; the viewer adds nothing to requests
+  that don't open it. A plain-PHP view, no front-end build step.
 
 ## Tier 2: speed and growing apps
 
-- `bin/pype optimize`: compile routes and config to a PHP file that opcache keeps in memory
-  (big win under FPM, where routes are rebuilt every request).
+- **Faster route matching**, keeping pype's Router API: a hash lookup for routes without
+  parameters, and one combined regex with PCRE `(*MARK)` for the rest. Measured 2026-10-19,
+  worst case:
+
+  | Routes | pype match | FastRoute match | pype build + match | FastRoute build + match |
+  |---|---|---|---|---|
+  | 30 | 2.3 µs | 0.3 µs | 16 µs | 30 µs |
+  | 150 | 10 µs | 0.9 µs | 77 µs | 290 µs |
+  | 500 | 33 µs | 2.7 µs | 252 µs | 2,347 µs |
+
+  FastRoute matches ~10× faster (one combined regex) but is slow to build its table. pype's
+  linear scan builds fast but matches slowly. Doing both natively gets the best of each, with no
+  dependency.
+- `bin/pype optimize`: compile routes (including the matching table above) and config to a PHP
+  file that opcache keeps in memory, so PHP-FPM stops rebuilding routes and reading `.env` on
+  every request.
 - Database-backed job queue + `queue:work` (`pcntl`); `schedule:run` for cron.
 - Seeders and test factories; migration rollback (`down()`); multiple database connections.
 - Thin HTTP client (curl). Translations (`intl` `MessageFormatter`).
@@ -61,6 +93,31 @@ anything big.
 - Benchmark real MySQL 8 (the bench uses MariaDB because Debian has no MySQL 8 package), e.g.
   with the database in a second container sharing the CPU limit.
 - Run on a quiet machine or a real 2 vCPU VPS. The desktop used so far makes p99 noisy.
+
+## Build or use a package?
+
+Reviewed 2026-10-19. The rule: **our own code on the per-request path**, where speed lives and
+where pype's design differs (stage lists per route, outlets, worker safety). **Packages** where
+the problem is security-sensitive, dev-only, or an interop interface.
+
+| Component | Decision | Why |
+|---|---|---|
+| Pipeline, stages, outlets | ours | pype's core idea; PSR-15 is one fixed middleware chain, not a stage list per route |
+| Router | ours, faster matching (Tier 2) | packages only map URL → handler; pype's routes carry stages, groups, stacks and outlets |
+| Container | ours | autowiring is all pype needs; PHP-DI is much bigger and needs compiling to be fast |
+| Request / Response | ours | PSR-7 copies objects on every change; HttpFoundation is a large dependency. Optional PSR-7 converters later for interop (RoadRunner) |
+| Sessions | ours | PHP's native `session_*` uses global state and sends its own headers; breaks OpenSwoole |
+| Query builder | ours | PDO directly is as fast as it gets; an ORM conflicts with the principles |
+| Migrations | ours (done) | runs only at deploy, so a package would cost nothing per request, but Phinx/Doctrine add many dependencies to every app. Revisit only for mature rollback/seeding |
+| Validation | ours, extend | built on `filter_var`; alternatives are far bigger for the same rules |
+| `.env` | ours | 61 lines; production should use the config cache (`optimize`) anyway |
+| Templates | plain PHP | fastest; existing engines may come as an opt-in outlet (Tier 3) |
+| Console | ours | CLI-only so no request cost either way; symfony/console would add packages to every app |
+| Mail | **package** behind our interface | SMTP/MIME are security-sensitive |
+| HTTP client | thin curl wrapper; point to symfony/http-client or Guzzle for more | same reason |
+| Dev error page | **package** (filp/whoops), dev-only | zero production cost |
+| Logger, cache | ours, implementing **PSR-3 / PSR-16** | interface packages only, so Monolog etc. plug in |
+| Encryption | native `sodium_*` | no package needed |
 
 ## Won't do (conflicts with the principles)
 
