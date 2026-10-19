@@ -41,8 +41,26 @@ anything big.
 - Redis stores (`phpredis`) for sessions, cache, rate limits.
 - FrankenPHP and RoadRunner adapters (same shape as `Server\SwooleServer`), only if wanted.
 - Minimal lifecycle hooks/events.
+- Swappable template renderer: keep plain-PHP views as the default, allow Latte or BladeOne as an
+  opt-in outlet. Measured per render (2026-10-15): plain PHP 10 µs, Latte 17 µs, BladeOne 32 µs
+  with 0 dependencies, Laravel Blade 26 µs but 26 packages.
 - Class-based views with richer behaviour. The owner wants this designed properly, explicitly
   **not** a cheap Livewire clone.
+
+## OpenSwoole follow-ups
+
+- Dev reload: `serve --server=swoole --watch` restarts workers when files change. Today code
+  changes need a restart.
+- Production hardening: run workers as an unprivileged user (OpenSwoole's `user`/`group`
+  settings), document a systemd unit and putting nginx in front for TLS.
+
+## Benchmark follow-ups
+
+- Find OpenSwoole's real ceiling (estimated ~10,000 users). Needs more than the 2000 seeded
+  accounts: raise `--users` in the bench Dockerfile and `SEEDED_USERS` in `k6/users.js`.
+- Benchmark real MySQL 8 (the bench uses MariaDB because Debian has no MySQL 8 package), e.g.
+  with the database in a second container sharing the CPU limit.
+- Run on a quiet machine or a real 2 vCPU VPS. The desktop used so far makes p99 noisy.
 
 ## Won't do (conflicts with the principles)
 
