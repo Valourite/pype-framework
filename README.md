@@ -30,6 +30,13 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype\Console`     | `bin/pype` commands: serve, routes, make:*, migrate                                       |
 | `Pype\Server`      | `SwooleServer`: run the app as a long-running OpenSwoole server (`APP_SERVER=swoole`)      |
 
+## Docs
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): how a request flows through stages and outlets, injection, context, providers
+- [`docs/ROADMAP.md`](docs/ROADMAP.md): what's planned, and what pype deliberately won't do
+- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md): load-test results (PHP-FPM vs OpenSwoole, SQLite/Postgres/MariaDB) and how to re-run them
+- [`CLAUDE.md`](CLAUDE.md): design principles, layout, commands, traps and the release process, for anyone (or any AI assistant) working on the framework
+
 ## Development
 
 ```bash

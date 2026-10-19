@@ -1,0 +1,70 @@
+# Benchmarks
+
+Numbers from load tests of "Spendwise", an expense-tracker app built on pype to try the
+framework out. The bench lives in that app: `bench/run.sh`, `bench/README.md`.
+
+To re-run (needs Docker):
+
+```bash
+cd expenses
+bench/run.sh                                                  # defaults
+LEVELS="1000 2000" SETUPS="sqlite:file:apcu:fpm sqlite:file:apcu:swoole" bench/run.sh
+```
+
+A setup is `database:sessions:ratelimits:server`. Each level takes about users/10 + 60 seconds.
+The machine used so far is a desktop in use, so p99 is noisy; compare p50/p95 and CPU.
+
+
+How: `run.sh` in the example app (`expenses/bench/`) builds one Docker container (nginx + PHP-FPM 8.5 or OpenSwoole, plus the database) capped at **2 vCPU / 4 GB** like a small VPS. It seeds 2000 users / ~390k expenses and simulates users with k6:
+- 70% browser users, 20% API clients, a sign-up every 2 s;
+- users think 1–3 s between pages;
+- numbers are from the steady phase, after everyone has signed in.
+
+See `expenses/bench/README.md`. Results are in `expenses/bench/results/<timestamp>/report.txt`.
+
+**Caveat:** the host is a desktop in use, so the slowest 1% (p99) is noisy run to run (e.g. FPM at 2000 users: 3 ms in one run, 416 ms in another). p50/p95, CPU and errors are stable.
+
+### 1. Baseline + the missing index (2026-10-15, run `20261015-232309`)
+- Found and fixed:
+  - SQLite "database is locked" → BEGIN IMMEDIATE;
+  - file-session GC reading every file;
+  - a missing `expenses(category_id)` index (categories page 99 ms → 0.17 ms; capacity ~330 → 930+ req/s).
+- 2000 users: ~930 req/s, p95 2–4 ms, CPU 75% of 200%, 0 errors.
+
+### 2. Databases + bottleneck fixes (2026-10-16, run `20261016-090320`)
+
+At 2000 users (~930 req/s):
+
+| Setup | p95 | CPU |
+|---|---|---|
+| SQLite | 2 ms | 76–82% |
+| Postgres 15 | 2 ms | 74% |
+| MariaDB 10.11 | 3 ms | 92% |
+
+- All three databases perform the same with the database on the same 2 vCPU box. Postgres/MySQL only pay off with several app servers.
+- **FPM ceiling ≈ 3000 users / ~1350 req/s:** CPU bursts hit 200% and p99 rises to ~1.5 s.
+- MariaDB stands in for MySQL in the bench (Debian has no MySQL 8). Real MySQL 8.4 passes the test suite.
+- One unexplained, non-reproducible "No space left on device" burst in the first file-session run (disk had 40 GB free; a rerun was clean).
+
+### 3. PHP-FPM vs OpenSwoole (2026-10-16 and 2026-10-19, SQLite + file sessions + APCu)
+
+All runs combined in `expenses/bench/results/combined-fpm-vs-swoole/report.txt`. 1000–2000 users: run `20261016-105956`. 3000–5000: `20261019-093344` (OpenSwoole) and `20261019-095802` (FPM).
+
+| Users | Server | req/s | page p50 / p95 / p99 | form posts p95 | login p95 | CPU (200% = both cores) | memory |
+|---|---|---|---|---|---|---|---|
+| 1000 | FPM | 465 | 1 / 9 / 19 ms | 27 ms | 173 ms | 54% | 63 MB |
+| 1000 | OpenSwoole | 468 | 0 / 1 / 2 ms | 1 ms | 177 ms | 27% | 55 MB |
+| 2000 | FPM | 926 | 1 / 2 / 416 ms | 4 ms | 1.09 s | 87% | 99 MB |
+| 2000 | OpenSwoole | 930 | 0 / 1 / 5 ms | 1 ms | 177 ms | 40% | 93 MB |
+| 3000 | FPM | 1353 | 1 / 4 / 1470 ms | 98 ms | 2.19 s | 115% | 128 MB |
+| 3000 | OpenSwoole | 1396 | 0 / 1 / 4 ms | 1 ms | 169 ms | 51% | 120 MB |
+| 4000 | FPM | 1734 | 2 / 477 / 2700 ms | 710 ms | 3.39 s | 147% | 207 MB |
+| 4000 | OpenSwoole | 1865 | 0 / 1 / 5 ms | 1 ms | 181 ms | 65% | 221 MB |
+| 5000 | FPM | 1871 | 263 / 1790 / 3760 ms | 1.40 s | 4.50 s | 174% | 303 MB |
+| 5000 | OpenSwoole | 2322 | 0 / 1 / 7 ms | 1 ms | 215 ms | 87% | 359 MB |
+
+- **FPM is overloaded from about 4000 users on this box.** At 5000 it can't keep up: 1871 req/s against the ~2300 offered, with pages at 0.3–3.8 s.
+- **OpenSwoole at 5000 users still answers in 1 ms (p95) using 87% of 200% CPU.** Its ceiling wasn't reached. Extrapolating CPU linearly puts it at roughly 10,000 users / ~4,500 req/s. **Not measured.**
+- Memory grows with users for both (sessions and SQLite in page cache, more connections). OpenSwoole's isn't a leak: the worker-safety test shows flat PHP memory.
+- **The small "errors" at 3000+ users (0.01–0.07%) are a k6 artifact, not the servers.** k6 stopped the test 30 s after the end and cut off users mid-visit, reporting their in-flight requests as timeouts. That's why they grew with user count and hit FPM and OpenSwoole equally. A debug run proved it: all hung requests timed out in the test's final second, and the kernel showed no drops. With `gracefulStop`/`gracefulRampDown` = 60 s (now in `k6/users.js`), the same load gave **0** failures. Runs before 2026-10-19 don't have this fix.
+
