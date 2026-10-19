@@ -24,6 +24,9 @@ anything big.
   from the route), dates (`before`/`after`...), `items.*` wildcards and dot paths, `required_if`/
   `required_with`, `regex`, `same`/`different`, `between`, `digits`, `alpha*`, `uuid`, `ip`, `json`,
   `accepted`, `not_in`; closures get `($value, $field, $data)`; `Rule` interface; custom messages.
+- **Unreleased**: password reset core (`Auth\PasswordResets`), email verification
+  (`Auth::markEmailVerified/isEmailVerified/emailHash`, `EnsureEmailIsVerified`); the flows,
+  emails and pages live in the skeleton.
 - **Unreleased**: mail (`Message`, `Mail` classes, `Mailer::send()` / `later()`, PHPMailer
   SMTP/sendmail/mail, log/array/null transports) and `AfterResponse` + `Application::terminate()`.
 - **0.4.0**: logging (PSR-3 `Logger`, JSON lines, request log, forwarding to stderr/syslog/any PSR-3 logger), the live log viewer, the
@@ -35,7 +38,6 @@ anything big.
 |---|---|---|
 | Cache: `remember($key, $ttl, fn)`; APCu / file / array | `apcu_*`, `var_export` + opcache | Same driver pattern as sessions and rate limits. Implement **PSR-16** (`psr/simple-cache`, interfaces only) |
 | Encryption; "remember me" cookie guard | `sodium_crypto_secretbox` | Uses `APP_KEY` (exists since 0.3) |
-| Password reset; email verification | signed URLs + mail (both done) | |
 
 ## Tier 2: speed and growing apps
 

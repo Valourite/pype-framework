@@ -165,6 +165,14 @@ built in are `SessionGuard` (cookie session, only inside `'web'` so always CSRF-
 `Auth::attempt()` checks a password, `SessionGuard::login()` remembers the user,
 `Auth::issueToken()` makes an API token.
 
+Password resets and verification (the security-sensitive core; the flow is app code):
+`Auth\PasswordResets` stores `sha256(token)` in `password_resets` (one row per user), checks
+expiry (`auth.reset_ttl`) and throttle (`auth.reset_throttle`), and `reset()` deletes the token
+inside a transaction as the check, so of two racing requests only one changes the password; it
+then revokes API tokens. Verification uses a signed URL carrying `Auth::emailHash()` of the
+address; `Auth::markEmailVerified()` sets `email_verified_at`; the `EnsureEmailIsVerified` stage
+guards routes.
+
 ## Services and providers
 
 `Application` holds a PSR-11 `Container` (autowiring; `singleton`, `bind`, `instance`).

@@ -25,7 +25,7 @@ final class Auth
     private const DUMMY_HASH_COST_10 = '$2y$10$wYp4hT67v1phntjjECP77ubOxgIIrDOsD3Zjz6mbi8yyFXdmRb1gW';
     private const DUMMY_HASH_COST_12 = '$2y$12$KnSa9GFAjdNzsAKqknW5/OBJlST49PIrz7AMC4ZExxfLMEPc3vFPK';
 
-    /** @var array{table: string, user: class-string, identifier: string, password: string, tokens_table: string, token_ttl: ?int, guards: list<class-string<Guard>|Guard>} */
+    /** @var array{table: string, user: class-string, identifier: string, password: string, tokens_table: string, token_ttl: ?int, verified_column: string, resets_table: string, reset_ttl: int, reset_throttle: int, guards: list<class-string<Guard>|Guard>} */
     private array $config;
 
     public function __construct(private readonly Connection $db, array $config = [])
@@ -37,6 +37,10 @@ final class Auth
             'password' => 'password',
             'tokens_table' => 'api_tokens',
             'token_ttl' => null,
+            'verified_column' => 'email_verified_at',
+            'resets_table' => 'password_resets',
+            'reset_ttl' => 60,         // minutes a password reset link works
+            'reset_throttle' => 60,    // seconds before another link can be sent to the same user
             'guards' => [SessionGuard::class, TokenGuard::class],
             ...$config,
         ];
@@ -72,6 +76,66 @@ final class Auth
     public function findUser(int $id): ?object
     {
         return $this->users()->where('id', $id)->first();
+    }
+
+    /** The user with this identifier (email, by default), or null. */
+    public function findBy(string $identifier): ?object
+    {
+        return $this->users()->where($this->config['identifier'], $identifier)->first();
+    }
+
+    /** The configured user class (config auth.user). */
+    public function userClass(): string
+    {
+        return $this->config['user'];
+    }
+
+    /** @return array<string, mixed> */
+    public function config(): array
+    {
+        return $this->config;
+    }
+
+    /** Set a new password (hashed). */
+    public function updatePassword(object|int $user, string $password): void
+    {
+        $this->db->table($this->config['table'])->where('id', self::id($user))->update([
+            $this->config['password'] => $this->hash($password),
+        ]);
+    }
+
+    /** Record that the user proved they own their email address. */
+    public function markEmailVerified(object|int $user): void
+    {
+        $this->db->table($this->config['table'])->where('id', self::id($user))->update([
+            $this->config['verified_column'] => gmdate('Y-m-d H:i:s'),
+        ]);
+    }
+
+    public function isEmailVerified(object|int $user): bool
+    {
+        $column = $this->config['verified_column'];
+
+        if (is_object($user) && property_exists($user, $column)) {
+            return $user->{$column} !== null;
+        }
+
+        return $this->db->table($this->config['table'])->where('id', self::id($user))->value($column) !== null;
+    }
+
+    /**
+     * Ties a verification link to the address it was sent to: if the email changes, old links
+     * stop working. Not secret (the link is signed); just a fingerprint of the address.
+     */
+    public function verificationHash(object $user): string
+    {
+        return self::emailHash((string) $user->{$this->config['identifier']});
+    }
+
+    /** verificationHash() for an address, for code without Auth at hand (e.g. a Mail class building the link). */
+    public static function emailHash(string $email): string
+    {
+        return substr(hash('sha256', strtolower(trim($email))), 0, 40);
     }
 
     /** Check credentials. Returns the user, or null. Timing is equal whether or not the user exists. */
@@ -162,6 +226,11 @@ final class Auth
         return $this->db->table($this->config['tokens_table'])
             ->where('expires_at', '<=', gmdate('Y-m-d H:i:s'))
             ->delete();
+    }
+
+    private static function id(object|int $user): int
+    {
+        return is_int($user) ? $user : (int) $user->id;
     }
 
     private function users(): \Pype\Database\QueryBuilder

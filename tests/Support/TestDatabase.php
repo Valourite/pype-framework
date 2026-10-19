@@ -61,6 +61,12 @@ final class TestDatabase
             $t->string('name');
             $t->string('email')->unique();
             $t->string('password');
+            $t->timestamp('email_verified_at')->nullable();
+        });
+        $schema->create('password_resets', function (Table $t) {
+            $t->foreignId('user_id')->primary()->constrained()->cascadeOnDelete();
+            $t->string('token_hash', 64)->unique();
+            $t->bigInteger('created_at');
         });
         $schema->create('api_tokens', function (Table $t) {
             $t->id();

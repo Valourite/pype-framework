@@ -96,6 +96,8 @@ symlinks this checkout into the app's `vendor/`.
   plain PHP + inline CSS/JS, no external requests. Insert log text with `textContent` / `$h()`.
   Never show secrets on the error page (see `ErrorPage::SECRET_*`), and keep the viewer
   unregistered in production unless guarded by stages.
+- App test suites set a fixed test `APP_KEY` (signed URLs) and `MAIL_DRIVER=array` in
+  phpunit.xml; tests read mail with `$app->container->get(Pype\Mail\Transport::class)->messages()`.
 - App test suites set `LOG_PATH=storage/logs/testing` and `LOG_REQUESTS=false` (phpunit.xml) so
   test runs don't fill the app's log.
 - `Validate` keeps `$rules`/`$messages` as plain properties with defaults: apps subclass it with
