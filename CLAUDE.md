@@ -20,7 +20,10 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 4. **Nothing costs anything unless it's used.** A feature that isn't configured must not be
    loaded, connect, or run per request (e.g. `SwooleServer`, the schema builder, rate-limit
    drivers are only autoloaded when picked). Measure when in doubt (`docs/BENCHMARKS.md`).
-5. **No dependencies** beyond `psr/container`. Optional extensions go in composer `suggest`.
+5. **No runtime dependencies** except PSR interface packages (`psr/container` today; `psr/log` and
+   `psr/simple-cache` planned). Security-sensitive protocols (mail) use a package behind a pype
+   interface, as an optional `suggest`; dev-only tools (e.g. whoops) go in `require-dev`. See
+   "Build or use a package?" in `docs/ROADMAP.md`.
 6. **Worker-safe.** Apps may run under OpenSwoole, where one `Application` serves many
    requests. Per-request state lives on the `Request` (and its `Context`), never in services,
    singletons or statics. `tests/Unit/WorkerSafetyTest.php` guards this.
