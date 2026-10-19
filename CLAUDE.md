@@ -82,6 +82,11 @@ symlinks this checkout into the app's `vendor/`.
 - **Route matching** (see ARCHITECTURE "Route matching"): static paths beat `{param}` patterns;
   a Router's first lookup scans, later ones use compiled regexes; overlapping patterns always go
   through the scan so answers never depend on which path was taken. Keep `RouterTest` green.
+- `url()` inside a routes file runs while routes are still being registered, so it only finds
+  routes named **above** it. Inside closures (`RedirectOnSuccess(fn () => url(...))`) it runs at
+  request time and finds everything.
+- `Urls::current()` (behind `url()`) is the one intended process-wide reference: app-level data
+  only. Don't add others; per-request data goes on the Request.
 - Exceptions are caught per stage inside the pipeline, so outer stages always see a `Response`.
 - **SQLite transactions use `BEGIN IMMEDIATE`** (`Connection::sqliteTransaction`): a plain
   BEGIN fails with "database is locked" when it upgrades to a write under concurrency. PDO

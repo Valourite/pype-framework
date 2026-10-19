@@ -20,6 +20,7 @@ final class Route
         private readonly string $method,
         private readonly string $path,
         private array $stages,
+        private readonly string $namePrefix = '',   // from enclosing groups: 'admin.'
     ) {
     }
 
@@ -47,13 +48,18 @@ final class Route
         return $this;
     }
 
+    /**
+     * Name the route, so links to it can be built with url('name', [...]) instead of written
+     * by hand. Inside a group with a name prefix, the prefix is added: 'users' → 'admin.users'.
+     * Called without an argument, returns the full name.
+     */
     public function name(?string $name = null): self|string|null
     {
         if ($name === null) {
             return $this->name;
         }
 
-        $this->name = $name;
+        $this->name = $this->namePrefix . $name;
 
         return $this;
     }

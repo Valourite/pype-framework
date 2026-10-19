@@ -31,6 +31,7 @@ final class Console
             'make:migration' => ['Create database/migrations/<timestamp>_<name>.php [--sql for plain SQL]', $this->makeMigration(...)],
             'migrate' => ['Run pending migrations', $this->migrate(...)],
             'migrate:status' => ['Show which migrations have run', $this->migrateStatus(...)],
+            'key:generate' => ['Set APP_KEY in .env (for signed URLs) [--show] [--force]', $this->keyGenerate(...)],
             'optimize' => ['Compile the route tables to ' . Application::ROUTE_CACHE . ' (run on deploy)', $this->optimize(...)],
             'optimize:clear' => ['Remove the compiled route tables', $this->optimizeClear(...)],
         ];
@@ -113,7 +114,7 @@ final class Console
             $stages = implode(' → ', array_map($describe, array_diff_key($compiled, $outlets)));
             $outlet = $outlets === [] ? '' : '  ⇒ ' . $describe(end($outlets));
 
-            printf("%-7s %-28s %s%s\n", $route->method(), $route->path(), $stages, $outlet);
+            printf("%-7s %-28s %-18s %s%s\n", $route->method(), $route->path(), $route->name() ?? '', $stages, $outlet);
         }
 
         return 0;
@@ -137,6 +138,40 @@ final class Console
         foreach ($this->app->container->get(Migrator::class)->status() as $name => $ran) {
             printf("  [%s] %s\n", $ran ? 'x' : ' ', $name);
         }
+
+        return 0;
+    }
+
+    /**
+     * A random 32-byte key for signed URLs (and, later, encryption), written to .env as
+     * APP_KEY=base64:... Refuses to replace an existing key without --force: links signed
+     * with the old key stop working.
+     */
+    private function keyGenerate(array $args): int
+    {
+        $key = 'base64:' . base64_encode(random_bytes(32));
+
+        if (in_array('--show', $args, true)) {
+            echo $key, "\n";
+
+            return 0;
+        }
+
+        $file = $this->app->path('.env');
+        $env = is_file($file) ? (string) file_get_contents($file) : '';
+
+        if (preg_match('/^APP_KEY=(\S+)/m', $env) && !in_array('--force', $args, true)) {
+            fwrite(STDERR, "APP_KEY is already set. Use --force to replace it (links signed with the old key stop working).\n");
+
+            return 1;
+        }
+
+        $env = preg_match('/^APP_KEY=.*$/m', $env)
+            ? (string) preg_replace('/^APP_KEY=.*$/m', 'APP_KEY=' . $key, $env)
+            : rtrim($env, "\n") . ($env === '' ? '' : "\n") . 'APP_KEY=' . $key . "\n";
+
+        file_put_contents($file, $env);
+        echo "APP_KEY set in .env\n";
 
         return 0;
     }

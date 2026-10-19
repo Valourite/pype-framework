@@ -92,6 +92,22 @@ Measured (2026-10-19, worst-case route): a lookup on a long-running server takes
 routes) to 1.5 µs (500); the old plain scan took 2.3–33 µs, FastRoute 0.3–2.7 µs. Under PHP-FPM
 with `optimize`, routing adds ~1–4 µs on top of registering the routes.
 
+## Links to named routes
+
+`->name('expenses.edit')` names a route (groups can add a prefix: `group(..., name: 'admin.')`).
+`Routing\Urls` builds links: `to($name, $params, $absolute)` fills `{placeholders}` (encoded with
+`rawurlencode`) and puts the remaining params in the query string. `signed()` adds `expires` and
+`signature` = HMAC-SHA256 (`APP_KEY`) of the path plus the sorted query; the host isn't signed,
+so links survive proxies. The `ValidateSignature` stage checks it with `hash_equals` and returns
+403 otherwise.
+
+The global `url()` and `signed_url()` helpers reach the app's `Urls` through `Urls::current()`,
+set by the `Application` constructor. This is the one deliberate process-wide reference in pype:
+it only holds the route table and config (the same for every request), so it is worker-safe.
+
+Router::named() builds a name index on first use and rebuilds it on a miss (names are set
+after `add()`, by the chained `->name()`). Two routes with the same name are an error.
+
 ## Stacks
 
 Named lists of stages registered by providers or apps: `$app->stack('web', [...])`, used in

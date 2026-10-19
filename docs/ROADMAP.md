@@ -18,12 +18,13 @@ anything big.
   params) and `bin/pype optimize` (compiled route tables). Config caching was measured and
   skipped: loading config + `.env` takes ~11 µs, a cached config file wasn't faster. Details in
   `ARCHITECTURE.md` under "Route matching".
+- **Unreleased**: named routes with group prefixes, `url()` / `Urls`, signed URLs
+  (`signed_url()`, `ValidateSignature`, `APP_KEY` + `key:generate`), names in `bin/pype routes`.
 
 ## Tier 1: almost every app needs these
 
 | Feature | Built on | Notes |
 |---|---|---|
-| URL generation from named routes; signed URLs (with expiry) | `http_build_query`, `hash_hmac` | `Route::name()` exists, nothing uses it yet. Needed by the next items |
 | More validation rules: `regex`, `unique`/`exists`, `before`/`after`, `items.*`, closure rules, custom messages | `preg_match`, `filter_var`, query builder | Most common hand-written app code |
 | Logger: levels, daily file, request id; **log viewer page** (see below) | `file_put_contents(FILE_APPEND\|LOCK_EX)` | Implement the **PSR-3** interface (`psr/log`, interfaces only), so Monolog can be dropped in. Only `error_log` today (`Exceptions\ErrorLogReporter`) |
 | Cache: `remember($key, $ttl, fn)`; APCu / file / array | `apcu_*`, `var_export` + opcache | Same driver pattern as sessions and rate limits. Implement **PSR-16** (`psr/simple-cache`, interfaces only) |

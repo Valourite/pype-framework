@@ -71,6 +71,31 @@ final class ConsoleTest extends TestCase
         rmdir($base);
     }
 
+    public function test_key_generate_sets_app_key_once(): void
+    {
+        $base = sys_get_temp_dir() . '/pype-key-' . bin2hex(random_bytes(4));
+        mkdir($base);
+        file_put_contents("{$base}/.env", "APP_NAME=x\nAPP_KEY=\nDB_CONNECTION=sqlite\n");
+
+        [$code] = $this->console(new Application($base), 'key:generate');
+        $this->assertSame(0, $code);
+        $env = (string) file_get_contents("{$base}/.env");
+        $this->assertMatchesRegularExpression('/^APP_KEY=base64:[A-Za-z0-9+\/]{43}=$/m', $env);
+        $this->assertStringContainsString("APP_NAME=x\n", $env);
+        $this->assertSame(32, strlen(\Pype\Routing\Urls::decodeKey(substr((string) strstr($env, 'base64:'), 0, 51))));
+
+        [$code] = $this->console(new Application($base), 'key:generate');
+        $this->assertSame(1, $code, 'an existing key is kept');
+        $this->assertSame($env, file_get_contents("{$base}/.env"));
+
+        [$code] = $this->console(new Application($base), 'key:generate', '--force');
+        $this->assertSame(0, $code);
+        $this->assertNotSame($env, file_get_contents("{$base}/.env"));
+
+        unlink("{$base}/.env");
+        rmdir($base);
+    }
+
     public function test_optimize_writes_route_tables_the_app_then_uses(): void
     {
         $base = sys_get_temp_dir() . '/pype-optimize-' . bin2hex(random_bytes(4));

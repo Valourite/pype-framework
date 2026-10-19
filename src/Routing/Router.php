@@ -27,8 +27,11 @@ final class Router
     /** @var list<Route> */
     private array $routes = [];
 
-    /** @var list<array{prefix: string, stages: array}> */
+    /** @var list<array{prefix: string, stages: array, name: string}> */
     private array $groupStack = [];
+
+    /** @var array<string, Route>|null name => route, built on first lookup by name */
+    private ?array $named = null;
 
     /** @var array<string, list<string|Stage|Closure>> */
     private array $stacks = [];
@@ -144,10 +147,12 @@ final class Router
     public function add(string $method, string $path, string|object|array $stages): Route
     {
         $prefix = '';
+        $namePrefix = '';
         $groupStages = [];
 
         foreach ($this->groupStack as $group) {
             $prefix .= $group['prefix'];
+            $namePrefix .= $group['name'];
             array_push($groupStages, ...$group['stages']);
         }
 
@@ -155,12 +160,13 @@ final class Router
             strtoupper($method),
             $this->normalize($prefix . '/' . ltrim($path, '/')),
             [...$groupStages, ...(is_array($stages) ? $stages : [$stages])],
+            $namePrefix,
         );
 
         $this->routes[] = $route;
         $this->resolves = 0;
         $this->fingerprint .= $route->method() . ' ' . $route->path() . "\n";
-        $this->static = $this->dynamic = null;
+        $this->static = $this->dynamic = $this->named = null;
 
         return $route;
     }
@@ -168,10 +174,11 @@ final class Router
     /**
      * Share a path prefix and a set of stages across several routes.
      * Group stages run before each route's own stages. Groups can nest.
+     * $name prefixes the names of routes inside: name: 'admin.' turns ->name('users') into 'admin.users'.
      */
-    public function group(string $prefix, array $stages, Closure $routes): void
+    public function group(string $prefix, array $stages, Closure $routes, string $name = ''): void
     {
-        $this->groupStack[] = ['prefix' => $this->normalize($prefix), 'stages' => $stages];
+        $this->groupStack[] = ['prefix' => $this->normalize($prefix), 'stages' => $stages, 'name' => $name];
 
         try {
             $routes($this);
@@ -420,6 +427,27 @@ final class Router
     public function compiled(): array
     {
         return ['signature' => $this->signature(), 'static' => $this->compileStatic(), 'dynamic' => $this->compileDynamic()];
+    }
+
+    /** The route with this name, or null. */
+    public function named(string $name): ?Route
+    {
+        // Names are set after add() (->name() is chained), so a miss rebuilds the index once.
+        if (!isset($this->named[$name])) {
+            $this->named = [];
+            foreach ($this->routes as $route) {
+                $routeName = $route->name();
+                if ($routeName === null) {
+                    continue;
+                }
+                if (isset($this->named[$routeName])) {
+                    throw new LogicException("Two routes are named [{$routeName}]: {$this->named[$routeName]->method()} {$this->named[$routeName]->path()} and {$route->method()} {$route->path()}.");
+                }
+                $this->named[$routeName] = $route;
+            }
+        }
+
+        return $this->named[$name] ?? null;
     }
 
     /** @return list<Route> */

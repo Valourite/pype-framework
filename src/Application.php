@@ -17,6 +17,7 @@ use Pype\Outlet\JsonOutlet;
 use Pype\Outlet\Outlet;
 use Pype\Pipeline\Pipeline;
 use Pype\Routing\Router;
+use Pype\Routing\Urls;
 use Throwable;
 
 /**
@@ -65,6 +66,11 @@ final class Application
         $this->container->instance(ContainerInterface::class, $this->container);
         $this->container->instance(Router::class, $this->router);
         $this->router->cacheFrom($this->path(self::ROUTE_CACHE));   // read lazily, only if `optimize` wrote it
+
+        // Links to named routes: url(), signed_url(), or inject Urls.
+        $urls = new Urls($this->router, (string) $this->config('app.url', ''), Urls::decodeKey((string) $this->config('app.key', '')));
+        $this->container->instance(Urls::class, $urls);
+        Urls::setCurrent($urls);
 
         foreach ($this->config('app.providers', []) as $provider) {
             $this->register($provider);
