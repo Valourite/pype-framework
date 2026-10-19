@@ -80,6 +80,7 @@ final class TestClient
 
         $request = Request::create($method, $uri, $body, $headers, $files);
         $response = $this->app->handle($request);
+        $this->app->terminate($request);   // after-response work runs, as in a real server
         $this->cookies->store($response->cookies());
 
         return new TestResponse($response, $request);

@@ -136,6 +136,19 @@ after `add()`, by the chained `->name()`). Two routes with the same name are an 
   log lines through `LogReader::forRequest()`. Secrets are hidden: Authorization/Cookie headers,
   cookie values, and input fields named like pass/token/secret/key/card.
 
+## Mail and work after the response
+
+`Mail\MailProvider` (from `config/mail.php`) binds a `Transport` (PHPMailer for smtp/sendmail/
+mail, `LogTransport`, `ArrayTransport`, `NullTransport`, or a class) and the `Mailer`.
+`Mailer::prepare()` copies the message, fills the default sender, renders `view()` with `Views`,
+and makes a text part from the HTML (`Mailer::textFrom()`).
+
+`Mailer::later()` prepares now and pushes the delivery onto `Http\AfterResponse`, a list of
+callbacks kept in the request's context. `Application::terminate($request)` runs them once the
+response is on its way: `run()` calls it after `fastcgi_finish_request()` (PHP-FPM), the
+OpenSwoole server after writing the response, `TestClient` right after `handle()`. A failing
+callback is reported and doesn't stop the others; outside a request, `later()` sends at once.
+
 ## Stacks
 
 Named lists of stages registered by providers or apps: `$app->stack('web', [...])`, used in

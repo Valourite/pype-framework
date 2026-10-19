@@ -24,6 +24,8 @@ anything big.
   from the route), dates (`before`/`after`...), `items.*` wildcards and dot paths, `required_if`/
   `required_with`, `regex`, `same`/`different`, `between`, `digits`, `alpha*`, `uuid`, `ip`, `json`,
   `accepted`, `not_in`; closures get `($value, $field, $data)`; `Rule` interface; custom messages.
+- **Unreleased**: mail (`Message`, `Mail` classes, `Mailer::send()` / `later()`, PHPMailer
+  SMTP/sendmail/mail, log/array/null transports) and `AfterResponse` + `Application::terminate()`.
 - **0.4.0**: logging (PSR-3 `Logger`, JSON lines, request log, forwarding to stderr/syslog/any PSR-3 logger), the live log viewer, the
   development error page, `HtmlOutlet`.
 
@@ -33,8 +35,7 @@ anything big.
 |---|---|---|
 | Cache: `remember($key, $ttl, fn)`; APCu / file / array | `apcu_*`, `var_export` + opcache | Same driver pattern as sessions and rate limits. Implement **PSR-16** (`psr/simple-cache`, interfaces only) |
 | Encryption; "remember me" cookie guard | `sodium_crypto_secretbox` | Uses `APP_KEY` (exists since 0.3) |
-| Mail: `Mailer` interface; log driver + an SMTP driver | **a package**: PHPMailer (0 deps) or symfony/mailer | Don't write SMTP/MIME ourselves: security-sensitive and easy to get wrong. pype owns the small interface, the driver wraps the package (optional, composer `suggest`) |
-| Password reset; email verification | the above | |
+| Password reset; email verification | signed URLs + mail (both done) | |
 
 ## Tier 2: speed and growing apps
 
@@ -87,7 +88,7 @@ the problem is security-sensitive, dev-only, or an interop interface.
 | `.env` | ours | 61 lines; loading `.env` + config takes ~11 µs, so no config cache is needed (measured) |
 | Templates | plain PHP | fastest; existing engines may come as an opt-in outlet (Tier 3) |
 | Console | ours | CLI-only so no request cost either way; symfony/console would add packages to every app |
-| Mail | **package** behind our interface | SMTP/MIME are security-sensitive |
+| Mail | **PHPMailer** behind our `Transport` (done) | SMTP/MIME are security-sensitive; PHPMailer is 1 package and ~0.6 MB vs 12 new packages for symfony/mailer (measured 2026-10-19). A symfony driver can still be added as another Transport |
 | HTTP client | thin curl wrapper; point to symfony/http-client or Guzzle for more | same reason |
 | Dev error page | ours (done) | measured against whoops: same zero production cost, and only ours can show pype's route, stages and the request's log lines |
 | Logger, cache | ours, implementing **PSR-3** (done) / **PSR-16** | interface packages only, so Monolog etc. plug in |

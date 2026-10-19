@@ -29,6 +29,7 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype\Testing`     | `TestClient` — run requests in-process, no server; keeps cookies like a browser           |
 | `Pype\Console`     | `bin/pype` commands: serve, routes, make:*, migrate                                       |
 | `Pype\Log`         | PSR-3 `Logger` (JSON lines, a file per day; forwards to stderr, syslog or any PSR-3 logger), request log, and a live **log viewer** page with filters (`/_pype/logs`) |
+| `Pype\Mail`        | `Message`, `Mail` classes, `Mailer` (`send()`, or `later()` after the response); SMTP/sendmail via PHPMailer, log, array (tests) |
 | `Pype\Debug`       | development **error page**: trace with source, route and stages, request (secrets hidden), the request's log lines |
 | `Pype\Server`      | `SwooleServer`: run the app as a long-running OpenSwoole server (`APP_SERVER=swoole`)      |
 

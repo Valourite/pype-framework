@@ -47,6 +47,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 | `src/RateLimit/` | `RateLimiter` + database/apcu/array drivers (used by `Stages\Throttle`) |
 | `src/Stages/` | built-in stages: Cors, JsonBody, MethodOverride, RequestId, Throttle |
 | `src/Log/` | `Logger` (PSR-3, JSON lines), `LogReader`, `LogRequests`, `LogReporter`, `LogViewer` + `views/viewer.php`, `LogProvider` |
+| `src/Mail/` | `Message`, `Mail`, `Mailer`, `Transport` + PHPMailer/log/array/null transports, `MailProvider` |
 | `src/Debug/` | `ErrorPage` (dev error page outlet) + `views/error.php` |
 | `src/Server/` | `SwooleServer` (OpenSwoole adapter, `APP_SERVER=swoole`) |
 | `src/Console/` | `bin/pype` commands and `make:*` stubs |
@@ -100,6 +101,10 @@ symlinks this checkout into the app's `vendor/`.
 - `Validate` keeps `$rules`/`$messages` as plain properties with defaults: apps subclass it with
   their own constructor and never call parent's. Rule objects in routes are shared by all
   requests, so `DatabaseRule::using()` returns a copy instead of storing the connection.
+- Deferred work (`Mailer::later()`) goes on `AfterResponse` in the request context and runs in
+  `Application::terminate()`. Anything that serves requests must call terminate() after sending
+  the response (run(), SwooleServer, TestClient do). PHP's built-in dev server has no
+  fastcgi_finish_request(), so there the client still waits; PHP-FPM and OpenSwoole don't.
 - Exceptions are caught per stage inside the pipeline, so outer stages always see a `Response`.
 - **SQLite transactions use `BEGIN IMMEDIATE`** (`Connection::sqliteTransaction`): a plain
   BEGIN fails with "database is locked" when it upgrades to a write under concurrency. PDO

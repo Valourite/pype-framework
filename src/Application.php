@@ -12,6 +12,7 @@ use Pype\Debug\ErrorPage;
 use Pype\Exceptions\ErrorLogReporter;
 use Pype\Exceptions\HttpException;
 use Pype\Exceptions\Reporter;
+use Pype\Http\AfterResponse;
 use Pype\Http\Request;
 use Pype\Http\Response;
 use Pype\Outlet\JsonOutlet;
@@ -240,6 +241,31 @@ final class Application
         $request = Request::fromGlobals();
 
         $this->handle($request)->send($request);
+
+        // Under PHP-FPM, hand the response to the client now; deferred work runs after.
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
+
+        $this->terminate($request);
+    }
+
+    /**
+     * Run the request's AfterResponse callbacks (e.g. Mailer::later()). Called once the
+     * response is on its way: by run(), the OpenSwoole server and the TestClient. A failing
+     * callback is reported and never stops the others.
+     */
+    public function terminate(Request $request): void
+    {
+        $after = $request->context()->find(AfterResponse::class);
+
+        foreach ($after?->take() ?? [] as $callback) {
+            try {
+                $callback();
+            } catch (Throwable $e) {
+                $this->report($e, $request);
+            }
+        }
     }
 
     private function dispatch(Request $request): Response

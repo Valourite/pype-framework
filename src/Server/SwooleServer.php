@@ -100,6 +100,7 @@ final class SwooleServer
         try {
             $request = $this->toRequest($req);
             $this->emit($this->app->handle($request), $request, $res);
+            $this->app->terminate($request);   // the response is sent; now deferred work (Mailer::later)
         } catch (Throwable $e) {
             // Application::handle() already turns errors into responses; this is the last resort,
             // so one bad request never takes the worker down.
