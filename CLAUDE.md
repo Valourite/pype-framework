@@ -8,6 +8,24 @@ The starter app is `pype/pype` (github.com/Valourite/pype-skeleton); apps are cr
 Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` for what's planned,
 `docs/BENCHMARKS.md` for performance numbers and how to measure.
 
+## Where things stand (keep this current)
+
+- **Released:** 0.4.0 (framework + skeleton on Packagist).
+- **Unreleased, committed on `main` (not pushed):** validation rules, mail, password reset + email
+  verification, encryption, "remember me". The skeleton's `main` uses these, so **push/tag the
+  framework (0.5.0) before the skeleton**, then bump the skeleton to `^0.5` (see Releasing).
+- **Next:** cache, agreed in detail in `docs/ROADMAP.md` ("Next: cache"). Then the whole-page
+  caching stage as its own round, then Tier 2.
+- **Example app:** `../expenses` (local git repo only, never give it a remote). Its bench is in
+  `bench/` (see `docs/BENCHMARKS.md`).
+
+## How the owner works
+
+- Plans bigger rounds in plan mode first; answers design questions before code is written.
+- Commits and pushes only when asked; releases are explicit ("release 0.x").
+- Wants measured numbers (benchmarks) for performance claims, and honest caveats.
+- Prefers short benchmark runs (≤ ~10 minutes); the dev machine is a busy desktop, so p99 is noisy.
+
 ## Principles (the owner's, not negotiable without asking)
 
 1. **It should feel like writing PHP.** Plain classes, closures, arrays, `match`, typed params.
