@@ -47,6 +47,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 | `src/RateLimit/` | `RateLimiter` + database/apcu/array drivers (used by `Stages\Throttle`) |
 | `src/Stages/` | built-in stages: Cors, JsonBody, MethodOverride, RequestId, Throttle |
 | `src/Log/` | `Logger` (PSR-3, JSON lines), `LogReader`, `LogRequests`, `LogReporter`, `LogViewer` + `views/viewer.php`, `LogProvider` |
+| `src/Security/` | `Encrypter` (libsodium) |
 | `src/Mail/` | `Message`, `Mail`, `Mailer`, `Transport` + PHPMailer/log/array/null transports, `MailProvider` |
 | `src/Debug/` | `ErrorPage` (dev error page outlet) + `views/error.php` |
 | `src/Server/` | `SwooleServer` (OpenSwoole adapter, `APP_SERVER=swoole`) |

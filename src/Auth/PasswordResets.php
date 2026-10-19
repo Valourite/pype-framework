@@ -13,7 +13,7 @@ use Pype\Database\Connection;
  *   - a token works once, and only for config auth.reset_ttl minutes;
  *   - one token per user: creating a new one replaces the old; at most one per
  *     auth.reset_throttle seconds, so the form can't be used to flood someone's inbox;
- *   - a reset revokes the user's API tokens.
+ *   - a reset revokes the user's API tokens and "remember me" devices.
  *
  * Table password_resets(user_id PRIMARY KEY, token_hash UNIQUE, created_at). The flow (forms,
  * the email, wording) is app code; see the skeleton's ForgotPassword / ResetPassword handlers.
@@ -86,7 +86,8 @@ final class PasswordResets
             }
 
             $this->auth->updatePassword($user, $password);
-            $this->auth->revokeAll($user);
+            $this->auth->revokeAll($user);                                  // API tokens
+            $this->auth->rememberTokens()?->revokeAll((int) $user->id);     // remembered devices
 
             return $user;
         });

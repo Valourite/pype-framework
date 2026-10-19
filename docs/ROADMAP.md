@@ -24,6 +24,9 @@ anything big.
   from the route), dates (`before`/`after`...), `items.*` wildcards and dot paths, `required_if`/
   `required_with`, `regex`, `same`/`different`, `between`, `digits`, `alpha*`, `uuid`, `ip`, `json`,
   `accepted`, `not_in`; closures get `($value, $field, $data)`; `Rule` interface; custom messages.
+- **Unreleased**: `Security\Encrypter` (libsodium, APP_KEY, key rotation); "remember me"
+  (`Auth\RememberTokens`, a table per device, selector + validator, rotation, replay detection;
+  `SessionGuard::login(..., remember: true)`).
 - **Unreleased**: password reset core (`Auth\PasswordResets`), email verification
   (`Auth::markEmailVerified/isEmailVerified/emailHash`, `EnsureEmailIsVerified`); the flows,
   emails and pages live in the skeleton.
@@ -37,7 +40,6 @@ anything big.
 | Feature | Built on | Notes |
 |---|---|---|
 | Cache: `remember($key, $ttl, fn)`; APCu / file / array | `apcu_*`, `var_export` + opcache | Same driver pattern as sessions and rate limits. Implement **PSR-16** (`psr/simple-cache`, interfaces only) |
-| Encryption; "remember me" cookie guard | `sodium_crypto_secretbox` | Uses `APP_KEY` (exists since 0.3) |
 
 ## Tier 2: speed and growing apps
 

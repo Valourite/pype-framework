@@ -20,6 +20,7 @@ use Pype\Outlet\Outlet;
 use Pype\Pipeline\Pipeline;
 use Pype\Routing\Router;
 use Pype\Routing\Urls;
+use Pype\Security\Encrypter;
 use Throwable;
 
 /**
@@ -73,6 +74,12 @@ final class Application
         $urls = new Urls($this->router, (string) $this->config('app.url', ''), Urls::decodeKey((string) $this->config('app.key', '')));
         $this->container->instance(Urls::class, $urls);
         Urls::setCurrent($urls);
+
+        // Encryption with APP_KEY (and APP_PREVIOUS_KEYS while rotating). Built on first use only.
+        $this->container->singleton(Encrypter::class, fn () => new Encrypter(
+            Urls::decodeKey((string) $this->config('app.key', '')),
+            array_map(Urls::decodeKey(...), array_values(array_filter((array) $this->config('app.previous_keys', [])))),
+        ));
 
         foreach ($this->config('app.providers', []) as $provider) {
             $this->register($provider);

@@ -173,6 +173,19 @@ then revokes API tokens. Verification uses a signed URL carrying `Auth::emailHas
 address; `Auth::markEmailVerified()` sets `email_verified_at`; the `EnsureEmailIsVerified` stage
 guards routes.
 
+"Remember me" (`auth.remember_table`, off when null): `Auth\RememberTokens` keeps one row per
+device with a public selector and `sha256(validator)`; the cookie is `selector:validator`.
+`SessionGuard::authenticate()` falls back to the cookie when the session has no user, signs the
+user in with a new session id, and swaps in a new validator (the previous one stays valid for 60 s
+for simultaneous requests). A known selector with an older validator is treated as a replayed
+copy: all of the user's tokens are deleted. Cookies the guard needs to set travel on the
+`Session` object (`queueCookie()`), and `StartSession` adds them to the response. Logout and
+password resets revoke them.
+
+`Security\Encrypter` (bound by Application, built on first use): `sodium_crypto_secretbox` with
+APP_KEY, a random nonce per value, JSON (never unserialize), `pype1.` + URL-safe base64;
+`app.previous_keys` decrypt during key rotation.
+
 ## Services and providers
 
 `Application` holds a PSR-11 `Container` (autowiring; `singleton`, `bind`, `instance`).

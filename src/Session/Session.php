@@ -25,6 +25,9 @@ final class Session
     /** @var list<string> ids replaced during this request, to delete from the store */
     private array $replaced = [];
 
+    /** @var list<\Pype\Http\Cookie> extra cookies for this response (not stored) */
+    private array $cookies = [];
+
     /** @param array<string, mixed> $data */
     public function __construct(
         private string $id,
@@ -166,6 +169,20 @@ final class Session
         }
 
         return $this->data[self::TOKEN];
+    }
+
+    /** Send a cookie with this response (StartSession adds it). Used by the "remember me" login. */
+    public function queueCookie(\Pype\Http\Cookie $cookie): self
+    {
+        $this->cookies[$cookie->name] = $cookie;
+
+        return $this;
+    }
+
+    /** @return list<\Pype\Http\Cookie> */
+    public function queuedCookies(): array
+    {
+        return array_values($this->cookies);
     }
 
     public function regenerateToken(): self

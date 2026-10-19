@@ -72,6 +72,10 @@ final class StartSession implements Stage, ContainerAware
             $store->write($session->id(), $data, $this->lifetimeMinutes * 60);
         }
 
+        foreach ($session->queuedCookies() as $cookie) {
+            $response = $response->withCookie($cookie);
+        }
+
         return $response->withCookie(new Cookie(
             $this->cookie,
             $session->id(),

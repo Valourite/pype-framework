@@ -25,7 +25,7 @@ final class Auth
     private const DUMMY_HASH_COST_10 = '$2y$10$wYp4hT67v1phntjjECP77ubOxgIIrDOsD3Zjz6mbi8yyFXdmRb1gW';
     private const DUMMY_HASH_COST_12 = '$2y$12$KnSa9GFAjdNzsAKqknW5/OBJlST49PIrz7AMC4ZExxfLMEPc3vFPK';
 
-    /** @var array{table: string, user: class-string, identifier: string, password: string, tokens_table: string, token_ttl: ?int, verified_column: string, resets_table: string, reset_ttl: int, reset_throttle: int, guards: list<class-string<Guard>|Guard>} */
+    /** @var array{table: string, user: class-string, identifier: string, password: string, tokens_table: string, token_ttl: ?int, verified_column: string, resets_table: string, reset_ttl: int, reset_throttle: int, remember_table: ?string, remember_days: int, remember_cookie: string, remember_secure: bool, guards: list<class-string<Guard>|Guard>} */
     private array $config;
 
     public function __construct(private readonly Connection $db, array $config = [])
@@ -41,6 +41,10 @@ final class Auth
             'resets_table' => 'password_resets',
             'reset_ttl' => 60,         // minutes a password reset link works
             'reset_throttle' => 60,    // seconds before another link can be sent to the same user
+            'remember_table' => null,  // "remember me": null = off; the skeleton uses 'remember_tokens'
+            'remember_days' => 30,
+            'remember_cookie' => 'pype_remember',
+            'remember_secure' => false,
             'guards' => [SessionGuard::class, TokenGuard::class],
             ...$config,
         ];
@@ -82,6 +86,12 @@ final class Auth
     public function findBy(string $identifier): ?object
     {
         return $this->users()->where($this->config['identifier'], $identifier)->first();
+    }
+
+    /** "Remember me" tokens, or null when auth.remember_table isn't set. */
+    public function rememberTokens(): ?RememberTokens
+    {
+        return $this->config['remember_table'] === null ? null : new RememberTokens($this->db, $this->config['remember_table'], (int) $this->config['remember_days']);
     }
 
     /** The configured user class (config auth.user). */

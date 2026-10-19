@@ -20,7 +20,7 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype\Outlet`      | `Outlet` (abstract exit stage), `JsonOutlet`, `HtmlOutlet`, `FileOutlet`                 |
 | `Pype\View`        | plain-PHP templates: `ViewOutlet` (class-based views), `View`, layouts and partials      |
 | `Pype\Database`    | PDO `Connection`, `QueryBuilder` (joins, grouping, aggregates), `Migrator` (`.sql` or PHP), `Schema` builder — SQLite (WAL), MySQL, Postgres |
-| `Pype\Auth`        | `Auth` (users, passwords, API tokens), `Authenticate` stage, `Guard`s: `SessionGuard`, `TokenGuard`, or your own |
+| `Pype\Auth`        | `Auth` (users, passwords, API tokens), `Authenticate` stage, `Guard`s: `SessionGuard` (with "remember me"), `TokenGuard`, or your own; `PasswordResets`, `RememberTokens`, `EnsureEmailIsVerified` |
 | `Pype\Session`     | `StartSession`, `VerifyCsrfToken`, `FlashValidationErrors` (the `'web'` stack), `RedirectOnSuccess`, `Session`, `SessionStore`: database, file, array or your own. Only saved when changed (or once a minute to slide the expiry) |
 | `Pype\RateLimit`   | `RateLimiter` behind `Throttle`: `DatabaseRateLimiter` (one atomic upsert per hit), `ApcuRateLimiter`, or your own |
 | `Pype\Stages`      | built-in stages: `Cors`, `JsonBody`, `MethodOverride`, `RequestId`, `Throttle`             |
@@ -29,6 +29,7 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype\Testing`     | `TestClient` — run requests in-process, no server; keeps cookies like a browser           |
 | `Pype\Console`     | `bin/pype` commands: serve, routes, make:*, migrate                                       |
 | `Pype\Log`         | PSR-3 `Logger` (JSON lines, a file per day; forwards to stderr, syslog or any PSR-3 logger), request log, and a live **log viewer** page with filters (`/_pype/logs`) |
+| `Pype\Security`    | `Encrypter`: authenticated encryption (libsodium) with APP_KEY, key rotation       |
 | `Pype\Mail`        | `Message`, `Mail` classes, `Mailer` (`send()`, or `later()` after the response); SMTP/sendmail via PHPMailer, log, array (tests) |
 | `Pype\Debug`       | development **error page**: trace with source, route and stages, request (secrets hidden), the request's log lines |
 | `Pype\Server`      | `SwooleServer`: run the app as a long-running OpenSwoole server (`APP_SERVER=swoole`)      |

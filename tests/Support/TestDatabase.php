@@ -63,6 +63,17 @@ final class TestDatabase
             $t->string('password');
             $t->timestamp('email_verified_at')->nullable();
         });
+        $schema->create('remember_tokens', function (Table $t) {
+            $t->id();
+            $t->foreignId('user_id')->constrained()->cascadeOnDelete()->index();
+            $t->string('selector', 24)->unique();
+            $t->string('validator_hash', 64);
+            $t->string('previous_hash', 64)->nullable();
+            $t->bigInteger('rotated_at')->nullable();
+            $t->bigInteger('expires_at');
+            $t->bigInteger('last_used_at');
+            $t->string('user_agent')->nullable();
+        });
         $schema->create('password_resets', function (Table $t) {
             $t->foreignId('user_id')->primary()->constrained()->cascadeOnDelete();
             $t->string('token_hash', 64)->unique();
