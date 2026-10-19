@@ -65,5 +65,5 @@ anything big.
 ## Won't do (conflicts with the principles)
 
 - An ORM with magic properties or lazy loading (query builder + plain data classes instead).
-- Facades / static proxies; a template language; annotation/attribute routing.
+- Facades / static proxies; a template language of our own (plain PHP stays the default; an existing engine may be an opt-in outlet, see Tier 3); annotation/attribute routing.
 - Hidden global or static state.
