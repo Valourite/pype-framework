@@ -14,11 +14,11 @@ anything big.
   - file sessions (written only when changed); rate-limit drivers (database/APCu);
   - PHP schema builder; SQLite/MySQL/Postgres tested;
   - app CLI commands; OpenSwoole server (`APP_SERVER=swoole`).
-- **Unreleased**: faster route matching (hash for static paths, combined `(*MARK)` regexes for
+- **0.3.0**: faster route matching (hash for static paths, combined `(*MARK)` regexes for
   params) and `bin/pype optimize` (compiled route tables). Config caching was measured and
   skipped: loading config + `.env` takes ~11 µs, a cached config file wasn't faster. Details in
   `ARCHITECTURE.md` under "Route matching".
-- **Unreleased**: named routes with group prefixes, `url()` / `Urls`, signed URLs
+  Also named routes with group prefixes, `url()` / `Urls`, signed URLs
   (`signed_url()`, `ValidateSignature`, `APP_KEY` + `key:generate`), names in `bin/pype routes`.
 
 ## Tier 1: almost every app needs these
