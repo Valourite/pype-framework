@@ -6,7 +6,8 @@
     "require": {
         "php": ">=8.2",
         "ext-pdo": "*",
-        "psr/container": "^2.0"
+        "psr/container": "^2.0",
+        "psr/log": "^3.0"
     },
     "suggest": {
         "ext-openswoole": "Run pype as a long-running OpenSwoole server (APP_SERVER=swoole)",
@@ -30,7 +31,7 @@
     },
     "extra": {
         "branch-alias": {
-            "dev-main": "0.3.x-dev"
+            "dev-main": "0.4.x-dev"
         }
     },
     "scripts": {

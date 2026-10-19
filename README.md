@@ -17,7 +17,7 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype\Pipeline`    | `Stage` interface, `Pipeline`, `Invoker` (parameter injection for closures/invokables)    |
 | `Pype\Routing`     | `Router` (groups, named stacks), `Route`                                                  |
 | `Pype\Http`        | `Request`, `Response`, `Cookie`, typed `Context`                                          |
-| `Pype\Outlet`      | `Outlet` (abstract exit stage), `JsonOutlet`                                             |
+| `Pype\Outlet`      | `Outlet` (abstract exit stage), `JsonOutlet`, `HtmlOutlet`, `FileOutlet`                 |
 | `Pype\View`        | plain-PHP templates: `ViewOutlet` (class-based views), `View`, layouts and partials      |
 | `Pype\Database`    | PDO `Connection`, `QueryBuilder` (joins, grouping, aggregates), `Migrator` (`.sql` or PHP), `Schema` builder — SQLite (WAL), MySQL, Postgres |
 | `Pype\Auth`        | `Auth` (users, passwords, API tokens), `Authenticate` stage, `Guard`s: `SessionGuard`, `TokenGuard`, or your own |
@@ -28,6 +28,8 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype\Container`   | PSR-11 container with autowiring                                                          |
 | `Pype\Testing`     | `TestClient` — run requests in-process, no server; keeps cookies like a browser           |
 | `Pype\Console`     | `bin/pype` commands: serve, routes, make:*, migrate                                       |
+| `Pype\Log`         | PSR-3 `Logger` (JSON lines, a file per day; forwards to stderr, syslog or any PSR-3 logger), request log, and a live **log viewer** page with filters (`/_pype/logs`) |
+| `Pype\Debug`       | development **error page**: trace with source, route and stages, request (secrets hidden), the request's log lines |
 | `Pype\Server`      | `SwooleServer`: run the app as a long-running OpenSwoole server (`APP_SERVER=swoole`)      |
 
 ## Docs

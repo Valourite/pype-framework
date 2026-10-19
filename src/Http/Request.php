@@ -197,6 +197,12 @@ final class Request
         return $this->files;
     }
 
+    /** @return array<string, string> all headers, names lower-cased */
+    public function headers(): array
+    {
+        return $this->headers;
+    }
+
     public function header(string $name, ?string $default = null): ?string
     {
         return $this->headers[strtolower($name)] ?? $default;

@@ -92,6 +92,16 @@ final class Router
         return [...$outlets, ...$rest];
     }
 
+    /** A stage's short name for listings: 'Throttle', 'Closure', 'web'. */
+    public static function describe(mixed $stage): string
+    {
+        return match (true) {
+            is_string($stage) => str_contains($stage, '\\') ? substr((string) strrchr($stage, '\\'), 1) : $stage,
+            $stage instanceof Closure => 'Closure',
+            default => (new \ReflectionClass($stage))->getShortName(),
+        };
+    }
+
     public static function isOutlet(mixed $stage): bool
     {
         return $stage instanceof Outlet || (is_string($stage) && is_subclass_of($stage, Outlet::class));

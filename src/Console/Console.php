@@ -102,11 +102,7 @@ final class Console
 
     private function routes(): int
     {
-        $describe = static fn (mixed $stage): string => match (true) {
-            is_string($stage) => (str_contains($stage, '\\') ? substr(strrchr($stage, '\\'), 1) : $stage),
-            $stage instanceof Closure => 'Closure',
-            default => (new \ReflectionClass($stage))->getShortName(),
-        };
+        $describe = Router::describe(...);
 
         foreach ($this->app->router->routes() as $route) {
             $compiled = $this->app->router->compile($route->stages());

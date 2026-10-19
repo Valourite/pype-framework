@@ -108,6 +108,34 @@ it only holds the route table and config (the same for every request), so it is 
 Router::named() builds a name index on first use and rebuilds it on a miss (names are set
 after `add()`, by the chained `->name()`). Two routes with the same name are an error.
 
+## Logging and errors
+
+`Log\LogProvider` (from `config/log.php`) binds `Log\Logger` as `Psr\Log\LoggerInterface`:
+
+- **Entries** are one JSON object per line (`time`, `level`, `message`, `request_id`, `context`) in
+  `storage/logs/pype-YYYY-MM-DD.log`, appended with `LOCK_EX`; files older than `log.days` are
+  deleted (checked once a day per process).
+- **Request id:** the logger reads the request currently bound in the container (one request at
+  a time per process, under both FPM and OpenSwoole) and `RequestIdValue::for()` gives it an id
+  stored in the request's context, shared with the `RequestId` stage. So every line from one
+  request, and the error page, share one id.
+- **Forwarding:** entries at `log.forward_level` or above also go to each `log.forward` target:
+  `StreamLogger` (`stderr`/`stdout`, the same JSON line), `SyslogLogger` (`syslog()`), or any PSR-3
+  class from the container (Monolog + Sentry...). They get the raw message and context plus
+  `request_id`. The file is written first; a throwing target goes to `error_log()` only.
+- **Error reports:** `LogReporter` sends unexpected (5xx) errors to the log; `LogRequests`
+  (global, `log.requests`) writes "GET /path 200 3.1 ms" per request.
+- **Log viewer:** two routes under `log.viewer.path` (`pype.logs`, `pype.logs.entries`). The
+  page polls `entries?after=<byte offset>` about once a second; `LogReader::after()` stats the
+  file and reads only new complete lines. `tail()` reads backwards for the initial view and "load
+  older". The viewer's own requests are never logged. It's registered only when enabled AND
+  (APP_DEBUG or `log.viewer.stages` is non-empty), so it can't be public by accident.
+- **Error page:** `Debug\ErrorPage` is an outlet that `Application::renderException` attaches
+  to unexpected errors when `app.debug` is on and the client accepts `text/html` (API clients get
+  JSON). It already has an outlet, so route/group outlets don't replace it. It reads the request's
+  log lines through `LogReader::forRequest()`. Secrets are hidden: Authorization/Cookie headers,
+  cookie values, and input fields named like pass/token/secret/key/card.
+
 ## Stacks
 
 Named lists of stages registered by providers or apps: `$app->stack('web', [...])`, used in

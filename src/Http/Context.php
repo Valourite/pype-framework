@@ -71,6 +71,12 @@ final class Context
         return isset($this->items[$type]);
     }
 
+    /** @return list<class-string> what's in the context (for debugging) */
+    public function classes(): array
+    {
+        return array_keys($this->items);
+    }
+
     /** @param class-string $type */
     public function forget(string $type): self
     {

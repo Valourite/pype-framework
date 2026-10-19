@@ -8,6 +8,7 @@ use Closure;
 use Psr\Container\ContainerInterface;
 use Pype\Container\Container;
 use Pype\Container\ContainerAware;
+use Pype\Debug\ErrorPage;
 use Pype\Exceptions\ErrorLogReporter;
 use Pype\Exceptions\HttpException;
 use Pype\Exceptions\Reporter;
@@ -224,7 +225,7 @@ final class Application
             $response->render($request);
         } catch (Throwable $e) {
             $this->report($e, $request);
-            $response = $this->defaultRender($e)->withOutlet(new JsonOutlet());
+            $response = $this->debugPage($e, $request) ?? $this->defaultRender($e)->withOutlet(new JsonOutlet());
         }
 
         // Don't hold on to the request: in a long-running server the next one replaces it,
@@ -246,6 +247,7 @@ final class Application
         [$route, $params] = $this->router->resolve($request->method(), $request->path());
 
         $request->setParams($params);
+        $request->context()->put($route);   // for the request log and the error page
 
         return $this->pipeline()
             ->send($request)
@@ -273,13 +275,30 @@ final class Application
 
     private function renderException(Throwable $e, Request $request): Response
     {
-        $response = $this->customRender($e, $request) ?? $this->defaultRender($e);
+        $custom = $this->customRender($e, $request);
+        $response = $custom ?? $this->defaultRender($e);
 
         if ($response->status() >= 500) {
             $this->report($e, $request);
+
+            // Debug mode: browsers get the error page instead of the route's error view.
+            if ($custom === null && ($page = $this->debugPage($e, $request)) !== null) {
+                return $page;
+            }
         }
 
         return $response;
+    }
+
+    /** The development error page, for unexpected errors in debug mode when a browser asked. */
+    private function debugPage(Throwable $e, Request $request): ?Response
+    {
+        // Only for browsers (Accept: text/html): API clients and curl keep getting JSON.
+        if (!$this->config('app.debug') || $e instanceof HttpException || !str_contains((string) $request->header('accept'), 'text/html')) {
+            return null;
+        }
+
+        return Response::error(500, $e->getMessage())->withOutlet(new ErrorPage($e, $this));
     }
 
     private function customRender(Throwable $e, Request $request): ?Response

@@ -46,6 +46,8 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 | `src/Database/` | `Connection` (PDO), `QueryBuilder`, `Page`, `Migrator`, `Schema/` (builder) |
 | `src/RateLimit/` | `RateLimiter` + database/apcu/array drivers (used by `Stages\Throttle`) |
 | `src/Stages/` | built-in stages: Cors, JsonBody, MethodOverride, RequestId, Throttle |
+| `src/Log/` | `Logger` (PSR-3, JSON lines), `LogReader`, `LogRequests`, `LogReporter`, `LogViewer` + `views/viewer.php`, `LogProvider` |
+| `src/Debug/` | `ErrorPage` (dev error page outlet) + `views/error.php` |
 | `src/Server/` | `SwooleServer` (OpenSwoole adapter, `APP_SERVER=swoole`) |
 | `src/Console/` | `bin/pype` commands and `make:*` stubs |
 | `src/Testing/` | `TestClient` (in-process requests with a cookie jar), `TestResponse` |
@@ -87,6 +89,14 @@ symlinks this checkout into the app's `vendor/`.
   request time and finds everything.
 - `Urls::current()` (behind `url()`) is the one intended process-wide reference: app-level data
   only. Don't add others; per-request data goes on the Request.
+- The logger finds the request id through the request bound in the container: correct because
+  each process handles one request at a time. If coroutines are ever enabled, this must change.
+- The log viewer and error page are framework templates (`src/Log/views`, `src/Debug/views`):
+  plain PHP + inline CSS/JS, no external requests. Insert log text with `textContent` / `$h()`.
+  Never show secrets on the error page (see `ErrorPage::SECRET_*`), and keep the viewer
+  unregistered in production unless guarded by stages.
+- App test suites set `LOG_PATH=storage/logs/testing` and `LOG_REQUESTS=false` (phpunit.xml) so
+  test runs don't fill the app's log.
 - Exceptions are caught per stage inside the pipeline, so outer stages always see a `Response`.
 - **SQLite transactions use `BEGIN IMMEDIATE`** (`Connection::sqliteTransaction`): a plain
   BEGIN fails with "database is locked" when it upgrades to a write under concurrency. PDO

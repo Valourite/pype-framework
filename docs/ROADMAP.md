@@ -17,39 +17,21 @@ anything big.
 - **0.3.0**: faster route matching (hash for static paths, combined `(*MARK)` regexes for
   params) and `bin/pype optimize` (compiled route tables). Config caching was measured and
   skipped: loading config + `.env` takes ~11 µs, a cached config file wasn't faster. Details in
-  `ARCHITECTURE.md` under "Route matching".
-  Also named routes with group prefixes, `url()` / `Urls`, signed URLs
-  (`signed_url()`, `ValidateSignature`, `APP_KEY` + `key:generate`), names in `bin/pype routes`.
+  `ARCHITECTURE.md` under "Route matching". Also named routes with group prefixes, `url()` /
+  `Urls`, signed URLs (`signed_url()`, `ValidateSignature`, `APP_KEY` + `key:generate`), names in
+  `bin/pype routes`.
+- **0.4.0**: logging (PSR-3 `Logger`, JSON lines, request log, forwarding to stderr/syslog/any PSR-3 logger), the live log viewer, the
+  development error page, `HtmlOutlet`.
 
 ## Tier 1: almost every app needs these
 
 | Feature | Built on | Notes |
 |---|---|---|
 | More validation rules: `regex`, `unique`/`exists`, `before`/`after`, `items.*`, closure rules, custom messages | `preg_match`, `filter_var`, query builder | Most common hand-written app code |
-| Logger: levels, daily file, request id; **log viewer page** (see below) | `file_put_contents(FILE_APPEND\|LOCK_EX)` | Implement the **PSR-3** interface (`psr/log`, interfaces only), so Monolog can be dropped in. Only `error_log` today (`Exceptions\ErrorLogReporter`) |
 | Cache: `remember($key, $ttl, fn)`; APCu / file / array | `apcu_*`, `var_export` + opcache | Same driver pattern as sessions and rate limits. Implement **PSR-16** (`psr/simple-cache`, interfaces only) |
-| Encryption; "remember me" cookie guard | `sodium_crypto_secretbox` | Needs an `APP_KEY` |
+| Encryption; "remember me" cookie guard | `sodium_crypto_secretbox` | Uses `APP_KEY` (exists since 0.3) |
 | Mail: `Mailer` interface; log driver + an SMTP driver | **a package**: PHPMailer (0 deps) or symfony/mailer | Don't write SMTP/MIME ourselves: security-sensitive and easy to get wrong. pype owns the small interface, the driver wraps the package (optional, composer `suggest`) |
 | Password reset; email verification | the above | |
-| Development error page (trace + source) | **a package**: filp/whoops, dev-only | Costs nothing in production (require-dev). Today a dev crash is a bare JSON error |
-
-### Log viewer
-
-A built-in, opt-in page that shows log entries live as the app runs, with filters.
-
-- **Off by default.** Enabled in config (e.g. `log.viewer => true` plus a path such as
-  `/_pype/logs`), registered by a provider like any other routes. It must sit behind a stage the
-  app chooses (e.g. `'auth'` plus an admin check), and refuse to load when `APP_DEBUG=false`
-  unless explicitly allowed. Logs leak secrets.
-- **Live updates** with Server-Sent Events: the page opens an `EventSource`, the endpoint tails
-  the log file (`fopen` + `fseek` to the last offset, `fgets`), and streams new lines. Polling
-  (`?after=<offset>`) is the fallback. Note: under PHP-FPM and OpenSwoole (no coroutines) an open
-  stream holds one worker, so cap open viewers and stream duration, and reconnect.
-- **Filters:** level (debug…emergency), request id (click one to see a whole request), text
-  search, time range. Entries are one JSON object per line (`json_encode`), so filtering is a
-  cheap line scan with no parsing library.
-- **Speed:** the logger itself is an append with `LOCK_EX`; the viewer adds nothing to requests
-  that don't open it. A plain-PHP view, no front-end build step.
 
 ## Tier 2: speed and growing apps
 
@@ -104,8 +86,8 @@ the problem is security-sensitive, dev-only, or an interop interface.
 | Console | ours | CLI-only so no request cost either way; symfony/console would add packages to every app |
 | Mail | **package** behind our interface | SMTP/MIME are security-sensitive |
 | HTTP client | thin curl wrapper; point to symfony/http-client or Guzzle for more | same reason |
-| Dev error page | **package** (filp/whoops), dev-only | zero production cost |
-| Logger, cache | ours, implementing **PSR-3 / PSR-16** | interface packages only, so Monolog etc. plug in |
+| Dev error page | ours (done) | measured against whoops: same zero production cost, and only ours can show pype's route, stages and the request's log lines |
+| Logger, cache | ours, implementing **PSR-3** (done) / **PSR-16** | interface packages only, so Monolog etc. plug in |
 | Encryption | native `sodium_*` | no package needed |
 
 ## Won't do (conflicts with the principles)
