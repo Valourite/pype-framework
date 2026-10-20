@@ -9,6 +9,7 @@ use LogicException;
 use Psr\Log\LoggerInterface;
 use Pype\Http\AfterResponse;
 use Pype\Http\Request;
+use Pype\Queue\Queue;
 use Pype\View\Views;
 use Throwable;
 
@@ -17,6 +18,7 @@ use Throwable;
  *
  *   fn (Mailer $mailer) => $mailer->send(Message::to('ada@example.com')->subject('Hi')->html('<p>Hello</p>'));
  *   $mailer->later(new WelcomeMail($user));   // after the response, so the user doesn't wait
+ *   $mailer->queue(new WelcomeMail($user));   // by a queue worker, retried if the server is down
  *
  * Before sending it fills in the default sender (MAIL_FROM_ADDRESS / MAIL_FROM_NAME), renders a
  * view() into HTML, and makes the plain-text part from the HTML if none was given.
@@ -26,6 +28,7 @@ final class Mailer
     /**
      * @param array{0: string, 1: string}|null $from default sender
      * @param Closure(): ?Request|null         $request the request being handled, if any
+     * @param Closure(): Queue|null            $queue   the queue, built only when queue() is used
      */
     public function __construct(
         private readonly Transport $transport,
@@ -33,6 +36,7 @@ final class Mailer
         private readonly ?Views $views = null,
         private readonly ?LoggerInterface $log = null,
         private readonly ?Closure $request = null,
+        private readonly ?Closure $queue = null,
     ) {
     }
 
@@ -66,6 +70,19 @@ final class Mailer
         };
 
         $request === null ? $deliver() : AfterResponse::of($request)->push($deliver);
+    }
+
+    /**
+     * Send from a queue worker: the message is built and rendered now, and a SendQueuedMail job
+     * delivers it (3 tries). Attachments are file paths, so they must still exist then.
+     *
+     * @return string the job id
+     */
+    public function queue(Message|Mail $mail, ?string $queue = null): string
+    {
+        $queues = $this->queue ?? throw new LogicException('Mailer::queue() needs Pype\Queue\QueueProvider in config/app.php.');
+
+        return $queues()->push(new SendQueuedMail($this->prepare($mail)->withoutView()), $queue);
     }
 
     public function transport(): Transport

@@ -92,3 +92,24 @@ working set of 100 keys, value ~420 bytes serialized (an array). µs per call th
 - File `set` is the slowest (a temp file, `rename()`, `opcache_invalidate()`); caches are read
   far more than written. sqlite here has no network; MySQL/Postgres add a round trip (~50–200 µs).
 - Not measured: hit rates under load, or the effect on the expenses load test.
+
+### Queue throughput (2026-10-20, `bin/bench-queue.sh`)
+
+5000 no-op jobs pushed, then processed by 1 or 4 forked `Worker`s (`stopWhenEmpty`), PHP 8.3 in
+Docker, databases in their own containers with default settings (each commit is flushed to
+disk). Two runs; numbers agreed within ~3% except SQLite (±25%).
+
+| Database | push, µs/job | 1 worker, jobs/s | 4 workers, jobs/s |
+|---|---|---|---|
+| SQLite (file, WAL) | 15 | 3,600–5,000 | 3,400–4,400 |
+| MySQL 8.4 | 650 | 710 | 1,680 |
+| Postgres 17 | 205 | 1,450 | 4,150 |
+
+- Per job a worker does one claiming transaction (SELECT ... SKIP LOCKED + UPDATE) and one
+  DELETE: two commits, so the numbers are mostly the database's commit cost.
+- **SQLite doesn't scale with workers**: one writer at a time (`BEGIN IMMEDIATE`). It is still
+  the fastest here because it has no network and a cheap commit. Fine for one server.
+- **Postgres scales best** (SKIP LOCKED: 2.9× with 4 workers). MySQL 2.4×; its push is slow
+  because each autocommit INSERT waits for a log flush (`innodb_flush_log_at_trx_commit=1`).
+- Real jobs (mail, HTTP calls) take milliseconds, so the queue's overhead rarely matters;
+  add workers for slow jobs. Not measured: the desktop host's disk dominates commit times.

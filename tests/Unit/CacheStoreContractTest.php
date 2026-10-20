@@ -220,6 +220,24 @@ final class CacheStoreContractTest extends TestCase
         $this->assertSame('ran', $second->run(fn () => 'ran'));
         $this->assertTrue($first->get());          // run() released it
     }
+
+    #[DataProvider('stores')]
+    public function test_prune_expired(string $driver): void
+    {
+        if (!in_array($driver, ['file', 'database'], true)) {
+            $this->markTestSkipped('only the file and database stores keep expired entries');
+        }
+
+        $store = $this->store($driver);
+        $store->put('old', 1, 10);
+        $store->put('new', 2, 100);
+        $store->put('forever', 3, null);
+        $this->time += 10;
+
+        $this->assertSame(1, $store->pruneExpired());
+        $this->assertSame([true, 2], $store->fetch('new'));
+        $this->assertSame([true, 3], $store->fetch('forever'));
+    }
 }
 
 final class CacheValue

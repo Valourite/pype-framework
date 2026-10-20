@@ -28,14 +28,7 @@ final class TestDatabase
             return Connection::sqlite();
         }
 
-        $db = new Connection([
-            'driver' => $driver,
-            'host' => getenv('PYPE_TEST_DB_HOST') ?: '127.0.0.1',
-            'port' => (int) (getenv('PYPE_TEST_DB_PORT') ?: ($driver === 'mysql' ? 3306 : 5432)),
-            'database' => getenv('PYPE_TEST_DB_DATABASE') ?: 'pype_test',
-            'username' => getenv('PYPE_TEST_DB_USERNAME') ?: ($driver === 'mysql' ? 'root' : 'postgres'),
-            'password' => getenv('PYPE_TEST_DB_PASSWORD') ?: 'secret',
-        ]);
+        $db = self::connect();
 
         if ($driver === 'pgsql') {
             $db->statement('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
@@ -48,6 +41,28 @@ final class TestDatabase
         }
 
         return $db;
+    }
+
+    /**
+     * A new connection to the test server, without emptying it (e.g. one per forked process).
+     * On SQLite pass a file: separate connections to ':memory:' are separate databases.
+     */
+    public static function connect(?string $sqliteFile = null): Connection
+    {
+        $driver = self::driver();
+
+        if ($driver === 'sqlite') {
+            return Connection::sqlite($sqliteFile ?? ':memory:');
+        }
+
+        return new Connection([
+            'driver' => $driver,
+            'host' => getenv('PYPE_TEST_DB_HOST') ?: '127.0.0.1',
+            'port' => (int) (getenv('PYPE_TEST_DB_PORT') ?: ($driver === 'mysql' ? 3306 : 5432)),
+            'database' => getenv('PYPE_TEST_DB_DATABASE') ?: 'pype_test',
+            'username' => getenv('PYPE_TEST_DB_USERNAME') ?: ($driver === 'mysql' ? 'root' : 'postgres'),
+            'password' => getenv('PYPE_TEST_DB_PASSWORD') ?: 'secret',
+        ]);
     }
 
     /** users, api_tokens, rate_limits and sessions: the tables the auth and session tests need. */
@@ -113,5 +128,37 @@ final class TestDatabase
         });
 
         return $db;
+    }
+
+    /** jobs and failed_jobs, as the skeleton's migrations create them. */
+    public static function withQueueTables(?Connection $db = null): Connection
+    {
+        $db ??= self::fresh();
+        self::queueTables(new Schema($db));
+
+        return $db;
+    }
+
+    public static function queueTables(Schema $schema): void
+    {
+        $schema->create('jobs', function (Table $t) {
+            $t->id();
+            $t->string('queue', 64);
+            $t->string('name');
+            $t->longText('payload');
+            $t->integer('attempts')->default(0);
+            $t->bigInteger('available_at');
+            $t->bigInteger('reserved_at')->nullable();
+            $t->bigInteger('created_at');
+            $t->index(['queue', 'available_at']);
+        });
+        $schema->create('failed_jobs', function (Table $t) {
+            $t->id();
+            $t->string('queue', 64);
+            $t->string('name');
+            $t->longText('payload');
+            $t->longText('exception');
+            $t->bigInteger('failed_at');
+        });
     }
 }

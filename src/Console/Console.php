@@ -5,12 +5,18 @@ declare(strict_types=1);
 namespace Pype\Console;
 
 use Closure;
+use DateTimeImmutable;
+use Psr\Log\LoggerInterface;
 use Pype\Application;
 use Pype\Cache\Cache;
 use Pype\Cache\Store;
 use Pype\Database\Migrator;
 use Pype\Pipeline\Invoker;
+use Pype\Queue\FailedJobs;
+use Pype\Queue\Queue;
+use Pype\Queue\Worker;
 use Pype\Routing\Router;
+use Pype\Schedule\Schedule;
 use Pype\Server\SwooleServer;
 
 /**
@@ -18,6 +24,8 @@ use Pype\Server\SwooleServer;
  */
 final class Console
 {
+    private const SCHEDULE = 'routes/schedule.php';
+
     /** @var array<string, array{0: string, 1: Closure(list<string>): int}> */
     private array $commands;
 
@@ -29,6 +37,7 @@ final class Console
             'make:stage' => ['Create app/Stages/<Name>.php', fn (array $a) => $this->make('Stages', $a[0] ?? null, 'stage')],
             'make:outlet' => ['Create app/Outlets/<Name>.php', fn (array $a) => $this->make('Outlets', $a[0] ?? null, 'outlet')],
             'make:provider' => ['Create app/Providers/<Name>.php', fn (array $a) => $this->make('Providers', $a[0] ?? null, 'provider')],
+            'make:job' => ['Create app/Jobs/<Name>.php (push it with Pype\\Queue\\Queue)', fn (array $a) => $this->make('Jobs', $a[0] ?? null, 'job')],
             'make:command' => ['Create app/Commands/<Name>.php (register it in a provider)', fn (array $a) => $this->make('Commands', $a[0] ?? null, 'command')],
             'make:migration' => ['Create database/migrations/<timestamp>_<name>.php [--sql for plain SQL]', $this->makeMigration(...)],
             'migrate' => ['Run pending migrations', $this->migrate(...)],
@@ -37,11 +46,31 @@ final class Console
             'optimize' => ['Compile the route tables to ' . Application::ROUTE_CACHE . ' (run on deploy)', $this->optimize(...)],
             'optimize:clear' => ['Remove the compiled route tables', $this->optimizeClear(...)],
             'cache:clear' => ['Remove everything in the cache (keys with the cache prefix)', $this->cacheClear(...)],
+            'schedule:run' => ['Run the scheduled tasks that are due (call from cron every minute) [--time="Y-m-d H:i"]', $this->scheduleRun(...)],
+            'schedule:list' => ['List the scheduled tasks in ' . self::SCHEDULE, $this->scheduleList(...)],
+            'schedule:work' => ['Run schedule:run every minute, without cron (Ctrl+C to stop)', $this->scheduleWork(...)],
+            'queue:work' => ['Process queued jobs [--queue=default,mail] [--once] [--stop-when-empty] [--max-jobs=N] [--max-time=S] [--memory=128] [--sleep=1] [--timeout=60]', $this->queueWork(...)],
+            'queue:restart' => ['Tell running queue workers to stop after their current job (run on deploy)', $this->queueRestart(...)],
+            'queue:failed' => ['List failed jobs', $this->queueFailed(...)],
+            'queue:retry' => ['Push failed jobs back onto their queue: <id> or all', $this->queueRetry(...)],
+            'queue:forget' => ['Delete a failed job: <id>', $this->queueForget(...)],
         ];
 
         foreach ($app->commands() as $name => [$description, $handler]) {
             $this->commands[$name] = [$description, fn (array $args) => $this->runAppCommand($handler, $args)];
         }
+    }
+
+    /**
+     * Run a command in this process, as the scheduler does.
+     *
+     * @param list<string> $args
+     */
+    public function call(string $name, array $args = []): int
+    {
+        $command = $this->commands[$name] ?? throw new \InvalidArgumentException("Unknown command [{$name}].");
+
+        return ($command[1])($args);
     }
 
     /** @param class-string|Closure $handler */
@@ -221,6 +250,204 @@ final class Console
         return 0;
     }
 
+    /** Loaded only by the schedule commands, never for web requests. */
+    private function schedule(): Schedule
+    {
+        $schedule = new Schedule();
+        $file = $this->app->path((string) $this->app->config('app.schedule', self::SCHEDULE));
+
+        if (is_file($file)) {
+            (static function (Schedule $schedule, Application $app, string $__file): void {
+                require $__file;
+            })($schedule, $this->app, $file);
+        }
+
+        return $schedule;
+    }
+
+    private function scheduleRun(array $args): int
+    {
+        $time = (new Input($args))->option('time');
+        $now = new DateTimeImmutable($time ?? 'now');
+        $now = $now->setTime((int) $now->format('G'), (int) $now->format('i'));   // whole minutes
+        $results = $this->schedule()->run($now, $this->app->container, $this->call(...));
+
+        if ($results === []) {
+            echo "No scheduled tasks are due.\n";
+        }
+
+        foreach ($results as ['task' => $task, 'status' => $status, 'ms' => $ms, 'error' => $error]) {
+            printf("%-8s %s%s\n", $status, $task->description(), match ($status) {
+                'ran' => " ({$ms} ms)",
+                'failed' => ": {$error}",
+                default => '',
+            });
+        }
+
+        return in_array('failed', array_column($results, 'status'), true) ? 1 : 0;
+    }
+
+    private function scheduleList(): int
+    {
+        $tasks = $this->schedule()->tasks();
+
+        if ($tasks === []) {
+            echo 'No tasks in ' . self::SCHEDULE . ".\n";
+        }
+
+        foreach ($tasks as $task) {
+            $flags = array_filter([
+                $task->overlapMinutes() !== null ? 'without overlapping' : null,
+                $task->runsOnOneServer() ? 'one server' : null,
+                $task->condition() !== null ? 'conditional' : null,
+            ]);
+            printf("%-16s %-20s %s%s\n", $task->expression(), $task->timezoneName() ?? date_default_timezone_get(), $task->description(), $flags === [] ? '' : '  [' . implode(', ', $flags) . ']');
+        }
+
+        return 0;
+    }
+
+    /** For boxes without cron: a fresh `schedule:run` process at the start of every minute. */
+    private function scheduleWork(): int
+    {
+        $stop = false;
+
+        if (function_exists('pcntl_async_signals')) {
+            pcntl_async_signals(true);
+            pcntl_signal(SIGTERM, function () use (&$stop) { $stop = true; });
+            pcntl_signal(SIGINT, function () use (&$stop) { $stop = true; });
+        }
+
+        echo "Running the schedule every minute. Ctrl+C to stop.\n";
+        $script = $_SERVER['SCRIPT_FILENAME'] ?? $this->app->path('bin/pype');
+
+        while (!$stop) {
+            // Sleep in short steps so a signal stops us quickly.
+            $next = (intdiv(time(), 60) + 1) * 60;
+            while (!$stop && time() < $next) {
+                usleep(250_000);
+            }
+
+            if (!$stop) {
+                echo '[' . date('Y-m-d H:i') . "]\n";
+                passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($script) . ' schedule:run');
+            }
+        }
+
+        return 0;
+    }
+
+    private function queueWork(array $args): int
+    {
+        $in = new Input($args);
+        $container = $this->app->container;
+        $worker = new Worker(
+            $container->get(Queue::class),
+            $container,
+            $container->has(LoggerInterface::class) ? $container->get(LoggerInterface::class) : null,
+            $container->has(Store::class) ? $container->get(Cache::class) : null,
+        );
+
+        $queues = array_values(array_filter(array_map('trim', explode(',', $in->option('queue') ?? (string) $this->app->config('queue.default', 'default')))));
+        echo 'Processing jobs on ' . implode(', ', $queues) . ".\n";
+
+        $processed = $worker->run(
+            queues: $queues,
+            once: $in->flag('once'),
+            stopWhenEmpty: $in->flag('stop-when-empty'),
+            maxJobs: ($v = $in->option('max-jobs')) === null ? null : (int) $v,
+            maxTime: ($v = $in->option('max-time')) === null ? null : (int) $v,
+            memory: (int) ($in->option('memory') ?? 128),
+            sleep: (float) ($in->option('sleep') ?? 1),
+            timeout: (int) ($in->option('timeout') ?? 60),
+        );
+
+        echo "Processed {$processed} job(s).\n";
+
+        return 0;
+    }
+
+    private function queueRestart(): int
+    {
+        if (!$this->app->container->has(Store::class)) {
+            fwrite(STDERR, "queue:restart signals workers through the cache: register Pype\\Cache\\CacheProvider.\n");
+
+            return 1;
+        }
+
+        $this->app->container->get(Cache::class)->forever(Worker::RESTART_KEY, microtime(true));
+        echo "Workers will stop after their current job (your supervisor starts them again).\n";
+
+        return 0;
+    }
+
+    private function failedJobs(): ?FailedJobs
+    {
+        $queue = $this->app->container->get(Queue::class);
+
+        if (!$queue instanceof FailedJobs) {
+            fwrite(STDERR, 'QUEUE_DRIVER=' . $this->app->config('queue.driver', 'sync') . " keeps no failed jobs.\n");
+
+            return null;
+        }
+
+        return $queue;
+    }
+
+    private function queueFailed(): int
+    {
+        if (($failed = $this->failedJobs()) === null) {
+            return 1;
+        }
+
+        $rows = $failed->failed();
+        echo $rows === [] ? "No failed jobs.\n" : '';
+
+        foreach ($rows as $row) {
+            printf("%-6s %-19s %-10s %s\n       %s\n", $row['id'], date('Y-m-d H:i:s', $row['failed_at']), $row['queue'], $row['name'], strtok($row['exception'], "\n"));
+        }
+
+        return 0;
+    }
+
+    private function queueRetry(array $args): int
+    {
+        $id = (new Input($args))->argument(0);
+
+        if ($id === null || ($failed = $this->failedJobs()) === null) {
+            $id === null && fwrite(STDERR, "Usage: queue:retry <id>|all\n");
+
+            return 1;
+        }
+
+        $ids = $id === 'all' ? array_column($failed->failed(), 'id') : [$id];
+        $retried = array_filter($ids, $failed->retry(...));
+        echo count($retried) . " job(s) pushed back onto their queue.\n";
+
+        return count($retried) === count($ids) ? 0 : 1;
+    }
+
+    private function queueForget(array $args): int
+    {
+        $id = (new Input($args))->argument(0);
+
+        if ($id === null || ($failed = $this->failedJobs()) === null) {
+            $id === null && fwrite(STDERR, "Usage: queue:forget <id>\n");
+
+            return 1;
+        }
+
+        if (!$failed->forget($id)) {
+            fwrite(STDERR, "No failed job {$id}.\n");
+
+            return 1;
+        }
+
+        echo "Deleted failed job {$id}.\n";
+
+        return 0;
+    }
+
     private function optimizeClear(): int
     {
         @unlink($this->app->path(Application::ROUTE_CACHE));
@@ -365,6 +592,26 @@ final class Console
                         echo "Hello from {$class}\\n";
 
                         return 0;
+                    }
+                }
+                PHP,
+            'job' => <<<PHP
+                /**
+                 * A queued job: \$queue->push(new {$class}(...)). Keep only plain data in the
+                 * constructor (ids, strings, arrays); handle() gets services injected by type.
+                 */
+                final class {$class}
+                {
+                    public int \$tries = 1;          // how often it may run before it fails for good
+
+                    public array \$backoff = [10];   // seconds before each retry
+
+                    public function __construct()
+                    {
+                    }
+
+                    public function handle(): void
+                    {
                     }
                 }
                 PHP,

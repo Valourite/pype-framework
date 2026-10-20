@@ -8,6 +8,7 @@ use Psr\Log\LoggerInterface;
 use Pype\Application;
 use Pype\Http\Request;
 use Pype\Provider;
+use Pype\Queue\Queue;
 use Pype\View\Views;
 use Throwable;
 
@@ -37,6 +38,7 @@ final class MailProvider implements Provider
             self::optional($c, LoggerInterface::class),
             // One request at a time per process, so the bound request is the current one.
             static fn (): ?Request => $container->resolved(Request::class) ? $container->get(Request::class) : null,
+            $container->has(Queue::class) ? static fn (): Queue => $container->get(Queue::class) : null,
         ));
     }
 

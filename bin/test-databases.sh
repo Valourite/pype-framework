@@ -10,20 +10,20 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PHP="${PHP:-8.3}"
 DBS="${DBS:-sqlite mysql pgsql}"
 NET=pype-test-net
-IMAGE="pype-test-php:$PHP"
+IMAGE="pype-test-php:$PHP-2"   # bump the suffix when the Dockerfile changes
 
 cleanup() { docker rm -f pype-test-mysql pype-test-pgsql >/dev/null 2>&1 || true; docker network rm $NET >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 cleanup
 docker network create $NET >/dev/null
 
-# PHP with every PDO driver plus APCu (cached after the first run).
+# PHP with every PDO driver, pcntl (queue worker tests) and APCu (cached after the first run).
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
     echo "▸ Building $IMAGE"
     docker build -q -t "$IMAGE" - >/dev/null <<DOCKERFILE
 FROM php:$PHP-cli
 RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev && rm -rf /var/lib/apt/lists/* \
- && docker-php-ext-install pdo_mysql pdo_pgsql \
+ && docker-php-ext-install pdo_mysql pdo_pgsql pcntl \
  && pecl install apcu && docker-php-ext-enable apcu && echo 'apc.enable_cli=1' > /usr/local/etc/php/conf.d/apcu-cli.ini
 DOCKERFILE
 fi

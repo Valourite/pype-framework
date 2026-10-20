@@ -10,10 +10,11 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.5.0 (framework + skeleton on Packagist): validation rules, mail, password
-  reset + email verification, encryption, "remember me", cache.
-- **Next:** `schedule:run` + job queue (Tier 2 in `docs/ROADMAP.md`). Route caching is a parked
-  idea there ("Idea to circle back to").
+- **Released:** 0.6.0 (tagged; push only when the owner says): job queue + scheduler. 0.5.0
+  (on Packagist): validation rules, mail, password reset + email verification, encryption,
+  "remember me", cache.
+- **Next:** not decided (Tier 2 in `docs/ROADMAP.md`). Route caching is a parked idea there
+  ("Idea to circle back to").
 - **Example app:** `../expenses` (local git repo only, never give it a remote). Its bench is in
   `bench/` (see `docs/BENCHMARKS.md`).
 
@@ -61,6 +62,8 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 | `src/Session/` | session stages (`'web'` stack), `Session`, stores (database/file/array) |
 | `src/Database/` | `Connection` (PDO), `QueryBuilder`, `Page`, `Migrator`, `Schema/` (builder) |
 | `src/Cache/` | `Cache` (PSR-16 + remember/add/increment, `lock()`, `stale()`, `group()`), `Store` + file/apcu/database/array/null, `Lock`, `CacheProvider` |
+| `src/Queue/` | `Queue` + database/sync/array drivers, `QueuedJob`, `Worker` (`queue:work`), `FailedJobs`, `QueueProvider` |
+| `src/Schedule/` | `Schedule` (routes/schedule.php), `Task` (frequency helpers, locks), `Cron` (own parser) |
 | `src/RateLimit/` | `RateLimiter` + database/apcu/array drivers (used by `Stages\Throttle`) |
 | `src/Stages/` | built-in stages: Cors, JsonBody, MethodOverride, RequestId, Throttle |
 | `src/Log/` | `Logger` (PSR-3, JSON lines), `LogReader`, `LogRequests`, `LogReporter`, `LogViewer` + `views/viewer.php`, `LogProvider` |
@@ -83,6 +86,7 @@ composer install
 vendor/bin/phpunit                 # SQLite in memory, ~3 s
 bin/test-databases.sh              # same suite on SQLite, MySQL 8.4, Postgres 17 (Docker), APCu on
 bin/bench-cache.sh                 # cache store micro-benchmark (Docker image from test-databases.sh)
+bin/bench-queue.sh                 # queue throughput, 1 and 4 workers, on the three databases
 DBS=pgsql bin/test-databases.sh    # one database
 PHP=8.2 DBS=sqlite bin/test-databases.sh   # another PHP version (CI runs 8.2-8.4)
 ```
@@ -140,6 +144,15 @@ symlinks this checkout into the app's `vendor/`.
 - `Cache::group()` objects keep the version they were made with; the root `Cache` singleton has
   no mutable state. Don't add any (worker safety), and don't store group objects in services.
 - APCu's `apcu_delete()` returns false for a missing key; PSR-16 `delete()` must still return true.
+- `routes/schedule.php` must never be loaded per request (it's only `Console::schedule()`):
+  `ScheduleTest` checks a web request doesn't run it.
+- Queue workers are long-running like OpenSwoole: no per-job state in services. Forked test
+  workers need their **own** `Connection` (never share the parent's PDO across `pcntl_fork`),
+  and SQLite tests across processes need a file database (`:memory:` is per connection).
+- `schedule:run --time=...` is read in PHP's timezone; tasks may have their own. Pass a zone
+  (`--time="2026-10-21 00:05 Africa/Johannesburg"`) when testing a task by hand.
+- The Docker test image is tagged `pype-test-php:<php>-2`; bump the suffix whenever its
+  Dockerfile in `bin/test-databases.sh` changes (otherwise the cached image is reused).
 - Sessions are only written when their data changed or every `session.touch` seconds.
 - Load testing with k6: needs `noCookiesReset` + `redirects: 0` (or browser users silently log
   out), and a 60 s `gracefulStop` (or requests cut off at the end show up as timeouts).

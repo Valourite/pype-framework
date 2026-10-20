@@ -180,6 +180,42 @@ Built on top, in `Cache`:
 The root `Cache` is a singleton with no mutable state (only group objects, made per call, move
 to the new version on `flush()`), so it is worker-safe; `CacheTest` checks this.
 
+## Queue
+
+`Queue\QueueProvider` binds `Queue\Queue` from `config/queue.php`: `SyncQueue` (runs the job in
+`push()`, throws), `DatabaseQueue`, `ArrayQueue` (tests), or a class. A job is any object with
+`handle()`; it is stored as `base64(serialize())` (`Queue\Payload`), so its constructor data must
+be plain. Optional public `$tries` (default 1), `$backoff` (int or one per retry), `$timeout`,
+and `failed(Throwable)`, read through `QueuedJob`.
+
+`DatabaseQueue::pop()` claims inside `Connection::transaction()`: SELECT the oldest available row
+(`available_at <= now`, not reserved or reserved longer than `retry_after` ago) with
+`FOR UPDATE SKIP LOCKED` on MySQL/Postgres (SQLite: `BEGIN IMMEDIATE` serializes writers), then
+set `reserved_at` and `attempts + 1`. Success deletes the row; a failure releases it with the
+backoff while attempts < tries, else moves it to `failed_jobs` in one transaction. A payload that
+won't unserialize goes straight to `failed_jobs`. `QueueConcurrencyTest` forks 4 workers on all
+three databases and checks every job ran exactly once.
+
+`Queue\Worker` (`bin/pype queue:work`) loops pop → `Invoker::call([$job, 'handle'])` → delete /
+release / fail. It stops after the current job on SIGTERM/SIGINT (pcntl), `--max-jobs`,
+`--max-time`, `--memory`, or when the cache key `queue.restart` changes (`queue:restart`). A job
+running past its timeout trips `pcntl_alarm`: the worker logs and exits 1 for its supervisor to
+restart, and the job is re-claimed after `retry_after`. A failing `pop()` (database gone) logs,
+disconnects the `Connection` and retries. `Mailer::queue()` renders now and pushes
+`Mail\SendQueuedMail` (the `Message` without its view data).
+
+## Schedule
+
+`routes/schedule.php` is loaded only by `Console` (`schedule:run`, `schedule:list`), with
+`$schedule` (`Schedule\Schedule`) and `$app` in scope. `Task`s hold a 5-field expression that the
+frequency helpers edit field by field, a timezone, `when()`, `withoutOverlapping()` (cache lock
+`schedule.{id}`) and `onOneServer()` (cache `add` of `schedule.{id}.{YmdHi}`). `Schedule\Cron` is
+our own parser (`*`, values, ranges, steps, lists, names; DOW 7 = 0; when both day fields are
+restricted either matches, and a field starting with `*` counts as unrestricted, as in cron).
+`Schedule::run()` runs due tasks one by one in-process: commands through `Console::call()`
+(non-zero exit = failure), closures through `Invoker`, jobs via `Queue::push()`; each failure is
+logged and the rest still run. `schedule:work` starts a fresh `schedule:run` process every minute.
+
 ## Stacks
 
 Named lists of stages registered by providers or apps: `$app->stack('web', [...])`, used in
@@ -222,7 +258,7 @@ APP_KEY, a random nonce per value, JSON (never unserialize), `pype1.` + URL-safe
 `Application` holds a PSR-11 `Container` (autowiring; `singleton`, `bind`, `instance`).
 Providers (listed in `config/app.php`) bind services from config: `DatabaseProvider`
 (`Connection`, `Migrator`, `RateLimiter`), `AuthProvider`, `SessionProvider` (`SessionStore`,
-`'web'`), `ViewProvider`, `MailProvider`, `CacheProvider`. Swappable backends follow one pattern: an interface, drivers chosen by
+`'web'`), `ViewProvider`, `MailProvider`, `CacheProvider`, `QueueProvider`. Swappable backends follow one pattern: an interface, drivers chosen by
 a config string, or your own class name.
 
 Services must be stateless across requests (see the worker-safety principle in `CLAUDE.md`).

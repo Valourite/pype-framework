@@ -83,6 +83,23 @@ final class FileStore implements Store
         return true;
     }
 
+    /** Delete expired files (they are otherwise only replaced, never removed); returns how many. */
+    public function pruneExpired(): int
+    {
+        $deleted = 0;
+
+        foreach (glob($this->directory . '/*.php') ?: [] as $file) {
+            $item = @include $file;
+
+            if (!is_array($item) || ($item[0] !== null && $item[0] <= $this->now())) {
+                $this->invalidate($file);
+                $deleted += (int) @unlink($file);
+            }
+        }
+
+        return $deleted;
+    }
+
     private function write(string $key, mixed $value, ?int $expiresAt): bool
     {
         $file = $this->file($key);

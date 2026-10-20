@@ -27,11 +27,13 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype\Validation`  | `Validate` stage, `Validator`, `ValidatedInput`                                           |
 | `Pype\Container`   | PSR-11 container with autowiring                                                          |
 | `Pype\Testing`     | `TestClient` — run requests in-process, no server; keeps cookies like a browser           |
-| `Pype\Console`     | `bin/pype` commands: serve, routes, make:*, migrate, optimize, cache:clear                |
+| `Pype\Console`     | `bin/pype` commands: serve, routes, make:*, migrate, optimize, cache:clear, schedule:*, queue:* |
 | `Pype\Log`         | PSR-3 `Logger` (JSON lines, a file per day; forwards to stderr, syslog or any PSR-3 logger), request log, and a live **log viewer** page with filters (`/_pype/logs`) |
 | `Pype\Security`    | `Encrypter`: authenticated encryption (libsodium) with APP_KEY, key rotation       |
 | `Pype\Mail`        | `Message`, `Mail` classes, `Mailer` (`send()`, or `later()` after the response); SMTP/sendmail via PHPMailer, log, array (tests) |
 | `Pype\Cache`       | PSR-16 `Cache` + `remember`, `add`, `increment`, `pull`, `forever`; `lock()`, `stale()` (refresh after the response), `group()->flush()`. Stores: file (opcache-served), APCu, database, array, null |
+| `Pype\Queue`       | background jobs: `Queue` (`push`, `later`), database (`SKIP LOCKED`), sync and array drivers, `Worker` (`queue:work`, retries, backoff, timeouts, failed jobs), `Mailer::queue()` |
+| `Pype\Schedule`    | `routes/schedule.php`: commands, closures and jobs on cron expressions or helpers (`dailyAt`, `weekdays`...), `withoutOverlapping`, `onOneServer`; `schedule:run` / `schedule:work` |
 | `Pype\Debug`       | development **error page**: trace with source, route and stages, request (secrets hidden), the request's log lines |
 | `Pype\Server`      | `SwooleServer`: run the app as a long-running OpenSwoole server (`APP_SERVER=swoole`)      |
 
@@ -39,7 +41,7 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): how a request flows through stages and outlets, injection, context, providers
 - [`docs/ROADMAP.md`](docs/ROADMAP.md): what's planned, and what pype deliberately won't do
-- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md): load-test results (PHP-FPM vs OpenSwoole, SQLite/Postgres/MariaDB), cache store timings, and how to re-run them
+- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md): load-test results (PHP-FPM vs OpenSwoole, SQLite/Postgres/MariaDB), cache store timings, queue throughput, and how to re-run them
 - [`CLAUDE.md`](CLAUDE.md): design principles, layout, commands, traps and the release process, for anyone (or any AI assistant) working on the framework
 
 ## Development

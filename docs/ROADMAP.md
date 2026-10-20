@@ -20,6 +20,10 @@ anything big.
   `ARCHITECTURE.md` under "Route matching". Also named routes with group prefixes, `url()` /
   `Urls`, signed URLs (`signed_url()`, `ValidateSignature`, `APP_KEY` + `key:generate`), names in
   `bin/pype routes`.
+- **0.6.0** (2026-10-20): database job queue (`Pype\Queue`: `push`/`later`, retries with backoff,
+  timeouts, failed jobs, `queue:work`/`restart`/`failed`/`retry`/`forget`, `Mailer::queue()`,
+  `make:job`) and the scheduler (`Pype\Schedule`, `routes/schedule.php`, own cron parser,
+  `withoutOverlapping`/`onOneServer`, `schedule:run`/`list`/`work`); `FileStore::pruneExpired()`.
 - **0.5.0** (2026-10-20):
   - validation rules: `unique`/`exists` (+ `Unique`/`Exists` objects, `{param}` from the route), dates (`before`/`after`...), `items.*` wildcards and dot paths, `required_if`/`required_with`, `regex`, `same`/`different`, `between`, `digits`, `alpha*`, `uuid`, `ip`, `json`, `accepted`, `not_in`; closures get `($value, $field, $data)`; `Rule` interface; custom messages.
   - `Security\Encrypter` (libsodium, APP_KEY, key rotation); "remember me" (`Auth\RememberTokens`, a table per device, selector + validator, rotation, replay detection; `SessionGuard::login(..., remember: true)`).
@@ -29,13 +33,9 @@ anything big.
 - **0.4.0**: logging (PSR-3 `Logger`, JSON lines, request log, forwarding to stderr/syslog/any PSR-3 logger), the live log viewer, the
   development error page, `HtmlOutlet`.
 
-## Next: `schedule:run` + job queue
+## Next: not decided
 
-The cache round finished Tier 1 (released in 0.5.0). Next, agreed 2026-10-20: the first Tier 2
-item, scheduling and a database-backed queue, as one round. To be planned in plan mode.
-
-Left out of the cache round on purpose: query-builder `->remember()` (couples DB and cache);
-cache events/stats.
+Pick the next round from Tier 2 / the follow-ups below with the owner.
 
 ## Idea to circle back to: route caching (discussed 2026-10-20, not planned)
 
@@ -71,7 +71,6 @@ $router->get('/dashboard', ['auth', new CacheRoute(ttl: 3600), ResolveMonth::cla
 
 ## Tier 2: speed and growing apps
 
-- Database-backed job queue + `queue:work` (`pcntl`); `schedule:run` for cron.
 - Seeders and test factories; migration rollback (`down()`); multiple database connections.
 - Thin HTTP client (curl). Translations (`intl` `MessageFormatter`).
 

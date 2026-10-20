@@ -160,6 +160,15 @@ final class Message
         return $this->view;
     }
 
+    /** A copy without the view() template and data (once rendered, e.g. before queueing). */
+    public function withoutView(): self
+    {
+        $copy = clone $this;
+        $copy->view = null;
+
+        return $copy;
+    }
+
     public function attachments(): array
     {
         return $this->attachments;
