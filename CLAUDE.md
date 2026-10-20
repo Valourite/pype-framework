@@ -5,18 +5,23 @@ pype is a small, pipeline-first PHP framework (PHP 8.2+). Each route is its own 
 The starter app is `pype/pype` (github.com/Valourite/pype-skeleton); apps are created with
 `composer create-project pype/pype`.
 
+`docs/GUIDE.md` is the app developer's guide (every built-in with examples; apps read it from
+`vendor/`, and their CLAUDE.md points there): **update it whenever a feature changes**.
 Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` for what's planned,
 `docs/BENCHMARKS.md` for performance numbers and how to measure.
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.8.0 (framework + skeleton on Packagist): factories + seeders, and the
+- **Released:** 0.8.1 (docs: `docs/GUIDE.md`), 0.8.0 (framework + skeleton on Packagist): factories + seeders, and the
   $12-server bench round (query builder memo, container-aware 1x workers, JWT, configurable
   errors, TrimStrings, insertReturning, URL-decoded params). 0.7.0: migration rollback + the
   Postgres insert fix. 0.6.0: queue + scheduler. 0.5.0: validation rules, mail, password
   reset/verification, encryption, remember me, cache.
-- **Next:** not decided (Tier 2 in `docs/ROADMAP.md`). Route caching is a parked idea there
-  ("Idea to circle back to").
+- **Next (owner's request, 2026-10-20, for a new session):** extend the expenses app: more users
+  and expenses, adding users (admin), an item catalogue, quotes and invoices, using the new
+  built-ins. Plan it in plan mode first; decisions needed: roles, PDFs, one company or several,
+  VAT. Framework gaps that round will hit are in ROADMAP "Gaps found by the docs test".
+  Route caching stays a parked idea there.
 - **Example app:** `../expenses` (local git repo only, never give it a remote). Its bench is in
   `bench/` (see `docs/BENCHMARKS.md`).
 

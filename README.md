@@ -39,6 +39,7 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 
 ## Docs
 
+- [`docs/GUIDE.md`](docs/GUIDE.md): **how to build an app with pype**, every built-in with examples (apps have it at `vendor/pype/framework/docs/GUIDE.md`)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): how a request flows through stages and outlets, injection, context, providers
 - [`docs/ROADMAP.md`](docs/ROADMAP.md): what's planned, and what pype deliberately won't do
 - [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md): load-test results (PHP-FPM vs OpenSwoole, SQLite/Postgres/MariaDB), cache store timings, queue throughput, and how to re-run them

@@ -20,6 +20,8 @@ anything big.
   `ARCHITECTURE.md` under "Route matching". Also named routes with group prefixes, `url()` /
   `Urls`, signed URLs (`signed_url()`, `ValidateSignature`, `APP_KEY` + `key:generate`), names in
   `bin/pype routes`.
+- **0.8.1** (2026-10-20): docs. The app guide is `docs/GUIDE.md` (shipped in `vendor/`, moved
+  from the skeleton README) with new Testing and Roles/ownership/per-user-limits sections.
 - **0.8.0** (2026-10-20): from the $12-server bench (see BENCHMARKS): query builder memoizes quoted
   identifiers (~6 → 1.4 µs per query); OpenSwoole defaults to 1 worker per core and reads the
   container's CPU limit; `Auth\Jwt` + `JwtGuard` (HS256/RS256); configurable wording for pype's
@@ -81,6 +83,19 @@ $router->get('/dashboard', ['auth', new CacheRoute(ttl: 3600), ResolveMonth::cla
 - **Considered and parked:** "holes" (donut caching: one shared shell, per-user parts filled
   per request, pype's own `csrf()`/`old()`/`error()`/flash as automatic holes, a debug-mode leak
   check). Only pays off on pages with a heavy shared part; one forgotten hole leaks a user's data.
+
+## Gaps found by the docs test (2026-10-20)
+
+A fresh agent given only the expenses app answered 12 "how would you build X?" tasks. These are
+places where pype itself, not the docs, came up short:
+
+- **Rules that know the user:** "unique per user" (`sku` within one user's items) can't be
+  expressed in `Validate`, because rules can't see the request context. Idea: `{user}` in rule strings
+  (like `{id}` for route params), or `rules(Request $request)`.
+- **Per-user rate limits:** `Throttle` keys on IP + route. Idea: `new Throttle(30, 60, by: 'user')`.
+- **Roles / authorization:** no built-in; apps write an ownership stage and an admin stage
+  (documented in GUIDE "Roles, ownership and per-user limits"). Idea: a small `Authorize`
+  stage taking a closure (`fn (User $u, Quote $q) => ...`), 404 or 403 on false.
 
 ## Tier 2: speed and growing apps
 
