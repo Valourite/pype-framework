@@ -19,7 +19,7 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype\Http`        | `Request`, `Response`, `Cookie`, typed `Context`                                          |
 | `Pype\Outlet`      | `Outlet` (abstract exit stage), `JsonOutlet`, `HtmlOutlet`, `FileOutlet`                 |
 | `Pype\View`        | plain-PHP templates: `ViewOutlet` (class-based views), `View`, layouts and partials      |
-| `Pype\Database`    | PDO `Connection`, `QueryBuilder` (joins, grouping, aggregates), `Migrator` (`.sql` or PHP), `Schema` builder — SQLite (WAL), MySQL, Postgres |
+| `Pype\Database`    | PDO `Connection`, `QueryBuilder` (joins, grouping, aggregates, `insertMany`, `insertReturning`), `Migrator` (`.sql` or PHP, rollback), `Schema` builder, `Factory` + `Fake` + `Seeder` — SQLite (WAL), MySQL, Postgres |
 | `Pype\Auth`        | `Auth` (users, passwords, API tokens), `Authenticate` stage, `Guard`s: `SessionGuard` (with "remember me"), `TokenGuard`, `JwtGuard` (HS256/RS256 via `Jwt`), or your own; `PasswordResets`, `RememberTokens`, `EnsureEmailIsVerified` |
 | `Pype\Session`     | `StartSession`, `VerifyCsrfToken`, `FlashValidationErrors` (the `'web'` stack), `RedirectOnSuccess`, `Session`, `SessionStore`: database, file, array or your own. Only saved when changed (or once a minute to slide the expiry) |
 | `Pype\RateLimit`   | `RateLimiter` behind `Throttle`: `DatabaseRateLimiter` (one atomic upsert per hit), `ApcuRateLimiter`, or your own |

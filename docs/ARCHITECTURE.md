@@ -289,7 +289,17 @@ driver; quoted identifiers are memoized per process (`QueryBuilder::$quoted`, ca
 so identifiers built from user input can't grow a worker's memory). That took building a query
 from ~6 µs to ~1.4 µs (the twelve bench). `insertReturning()` gets database-filled columns
 back: `INSERT ... RETURNING` on SQLite/Postgres, insert + select by `id` on MySQL. Route params
-are URL-decoded after matching (`Application::dispatch()`). Migrations are `.php` (schema builder: `Schema` → `Table`/`Column` → `Grammar` per
+are URL-decoded after matching (`Application::dispatch()`).
+
+Factories and seeders (CLI and tests only, never on the request path): `Database\Factory`
+builds rows from `definition(Fake)` + states, a sequence and overrides, then resolves closure
+values with the row so far (lazy relations). `create()` is one `insertReturning()` per row in a
+transaction, hydrated by `Database\Hydrator` (shared with `QueryBuilder::as()`); `insert()` is
+`QueryBuilder::insertMany()`: multi-row `VALUES`, chunked under the databases' parameter limits
+(≤ 30,000 per statement, ≤ 1,000 rows). `Database\Fake` uses `\Random\Randomizer`
+(Mt19937 when seeded); emails/usernames carry a process-wide serial. `Database\Seeder::run()`
+is called through the Invoker like a command (`db:seed`, guarded by `--force` without
+`app.debug`). Migrations are `.php` (schema builder: `Schema` → `Table`/`Column` → `Grammar` per
 driver) or `.sql`, run in name order, recorded by name and batch in `pype_migrations` (one
 batch per `migrate`). `rollback()` undoes the last batch (or the last N) newest first, via
 `down()` or the part of a `.sql` file after a `-- down` line; one without either is irreversible

@@ -10,14 +10,11 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.7.0 (framework + skeleton on Packagist): migration rollback (`down()`,
-  batches, `migrate:rollback`, `migrate:fresh`) and the Postgres `insert()` fix (0.6.0 and
-  earlier can't `migrate` a fresh Postgres database). 0.6.0: job queue + scheduler. 0.5.0:
-  validation rules, mail, password reset + email verification, encryption, remember me, cache.
-- **Unreleased, committed on `main` (not pushed):** the $12-server bench round (query builder memo, container-aware
-  1x OpenSwoole workers, JWT, configurable errors, TrimStrings, insertReturning, URL-decoded
-  params). See ROADMAP "Unreleased" and `../twelve-bench/`. The skeleton's `main` uses
-  `TrimStrings` and the JWT config, so release the framework (0.8.0) before pushing it.
+- **Released:** 0.8.0 (framework + skeleton on Packagist): factories + seeders, and the
+  $12-server bench round (query builder memo, container-aware 1x workers, JWT, configurable
+  errors, TrimStrings, insertReturning, URL-decoded params). 0.7.0: migration rollback + the
+  Postgres insert fix. 0.6.0: queue + scheduler. 0.5.0: validation rules, mail, password
+  reset/verification, encryption, remember me, cache.
 - **Next:** not decided (Tier 2 in `docs/ROADMAP.md`). Route caching is a parked idea there
   ("Idea to circle back to").
 - **Example app:** `../expenses` (local git repo only, never give it a remote). Its bench is in
@@ -65,7 +62,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 | `src/Validation/` | `Validator` (rules), `Validate` stage, `ValidatedInput` |
 | `src/Auth/` | `Auth` (users, passwords, API tokens), `Authenticate` stage, guards |
 | `src/Session/` | session stages (`'web'` stack), `Session`, stores (database/file/array) |
-| `src/Database/` | `Connection` (PDO), `QueryBuilder`, `Page`, `Migrator`, `Schema/` (builder) |
+| `src/Database/` | `Connection` (PDO), `QueryBuilder`, `Page`, `Migrator`, `Schema/` (builder), `Factory`/`Fake`/`Seeder`/`Hydrator` |
 | `src/Cache/` | `Cache` (PSR-16 + remember/add/increment, `lock()`, `stale()`, `group()`), `Store` + file/apcu/database/array/null, `Lock`, `CacheProvider` |
 | `src/Queue/` | `Queue` + database/sync/array drivers, `QueuedJob`, `Worker` (`queue:work`), `FailedJobs`, `QueueProvider` |
 | `src/Schedule/` | `Schedule` (routes/schedule.php), `Task` (frequency helpers, locks), `Cron` (own parser) |

@@ -33,6 +33,12 @@ See `expenses/bench/README.md`. Results are in `expenses/bench/results/<timestam
 
 ### 2. Databases + bottleneck fixes (2026-10-16, run `20261016-090320`)
 
+> **Invalid (found 2026-10-20):** the "Postgres 15" and "MariaDB 10.11" rows were really SQLite.
+> The bench container sourced `bench/db/env.sh <db>` with Debian's `sh` (dash), which ignores
+> arguments to `.`, so the script fell back to `DB_CONNECTION=sqlite` and the database servers
+> were never used (they weren't even seeded). Fixed in `expenses/bench/db/env.sh`; the
+> comparison needs re-running before any database conclusion is drawn.
+
 At 2000 users (~930 req/s):
 
 | Setup | p95 | CPU |
@@ -41,7 +47,7 @@ At 2000 users (~930 req/s):
 | Postgres 15 | 2 ms | 74% |
 | MariaDB 10.11 | 3 ms | 92% |
 
-- All three databases perform the same with the database on the same 2 vCPU box. Postgres/MySQL only pay off with several app servers.
+- ~~All three databases perform the same~~: not measured, see the note above.
 - **FPM ceiling ≈ 3000 users / ~1350 req/s:** CPU bursts hit 200% and p99 rises to ~1.5 s.
 - MariaDB stands in for MySQL in the bench (Debian has no MySQL 8). Real MySQL 8.4 passes the test suite.
 - One unexplained, non-reproducible "No space left on device" burst in the first file-session run (disk had 40 GB free; a rerun was clean).

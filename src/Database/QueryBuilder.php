@@ -375,6 +375,54 @@ final class QueryBuilder
         ) ?? [];
     }
 
+    /**
+     * Insert many rows in as few statements as the databases allow (multi-row VALUES, chunked
+     * under their parameter limits), in one transaction. Every row needs the same columns.
+     * Returns how many rows were inserted. For seeding and imports; use insert() for one row.
+     *
+     * @param list<array<string, mixed>> $rows
+     */
+    public function insertMany(array $rows): int
+    {
+        if ($rows === []) {
+            return 0;
+        }
+
+        $columns = array_keys($rows[0]);
+        $width = count($columns);
+
+        if ($width === 0) {
+            throw new InvalidArgumentException('Cannot insert empty rows.');
+        }
+
+        // SQLite allows 32766 parameters per statement, MySQL and Postgres 65535; stay well under.
+        $perStatement = max(1, min(1000, intdiv(30000, $width)));
+        $into = 'INSERT INTO ' . $this->col($this->table) . ' (' . implode(', ', array_map($this->col(...), $columns)) . ') VALUES ';
+        $tuple = '(' . implode(', ', array_fill(0, $width, '?')) . ')';
+
+        return $this->db->transaction(function (Connection $db) use ($rows, $columns, $perStatement, $into, $tuple) {
+            $inserted = 0;
+
+            foreach (array_chunk($rows, $perStatement) as $chunk) {
+                $bindings = [];
+
+                foreach ($chunk as $row) {
+                    if (count($row) !== count($columns) || array_diff_key($row, $rows[0]) !== []) {
+                        throw new InvalidArgumentException('insertMany() needs the same columns in every row.');
+                    }
+
+                    foreach ($columns as $column) {
+                        $bindings[] = $row[$column];
+                    }
+                }
+
+                $inserted += $db->execute($into . implode(', ', array_fill(0, count($chunk), $tuple)), $bindings);
+            }
+
+            return $inserted;
+        });
+    }
+
     public function update(array $values): int
     {
         $this->assertSimple('update');
@@ -486,24 +534,10 @@ final class QueryBuilder
 
     private function hydrate(array $row): array|object
     {
-        if ($this->as === null) {
-            return $row;
-        }
-
-        // Pass only columns the constructor accepts, so extra columns (e.g. password) never leak in.
-        return new ($this->as)(...array_intersect_key($row, self::constructorParams($this->as)));
+        return $this->as === null ? $row : Hydrator::make($this->as, $row);
     }
 
     /** @return array<string, true> */
-    private static function constructorParams(string $class): array
-    {
-        static $cache = [];
-
-        return $cache[$class] ??= array_fill_keys(array_map(
-            static fn (\ReflectionParameter $p) => $p->getName(),
-            (new \ReflectionClass($class))->getConstructor()?->getParameters() ?? [],
-        ), true);
-    }
 
     private function operator(string $operator): string
     {

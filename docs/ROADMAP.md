@@ -20,12 +20,16 @@ anything big.
   `ARCHITECTURE.md` under "Route matching". Also named routes with group prefixes, `url()` /
   `Urls`, signed URLs (`signed_url()`, `ValidateSignature`, `APP_KEY` + `key:generate`), names in
   `bin/pype routes`.
-- **Unreleased** (from the $12-server bench, see BENCHMARKS): query builder memoizes quoted
+- **0.8.0** (2026-10-20): from the $12-server bench (see BENCHMARKS): query builder memoizes quoted
   identifiers (~6 → 1.4 µs per query); OpenSwoole defaults to 1 worker per core and reads the
   container's CPU limit; `Auth\Jwt` + `JwtGuard` (HS256/RS256); configurable wording for pype's
   own errors (`app.errors`) and `Validate` status; `TrimStrings` stage; `insertReturning()`;
   `Request::withInput()`. Fixes: route params are URL-decoded; the container uses defaults for
   optional dependencies it can't build.
+  Factories and seeders (`Database\Factory`, `Fake`, `Seeder`, `Hydrator`,
+  `QueryBuilder::insertMany()`, `db:seed`, `migrate:fresh --seed`, `make:factory`,
+  `make:seeder`). fakerphp/faker considered (MIT, 12 MB, 75 locales): left as an app's choice
+  inside `definition()`, not a pype dependency.
 - **0.7.0** (2026-10-20): migration rollback (`down()`, `-- down` in `.sql`, batches,
   `migrate:rollback [--step=N]`, `migrate:fresh`, `Schema::dropAllTables()`); fix: `migrate` (and
   any `insert()` into a table without a sequence) failed on a fresh Postgres database.
@@ -80,7 +84,7 @@ $router->get('/dashboard', ['auth', new CacheRoute(ttl: 3600), ResolveMonth::cla
 
 ## Tier 2: speed and growing apps
 
-- Seeders and test factories; multiple database connections.
+- Multiple database connections.
 - Thin HTTP client (curl). Translations (`intl` `MessageFormatter`).
 
 ## Tier 3: later
@@ -105,6 +109,8 @@ $router->get('/dashboard', ['auth', new CacheRoute(ttl: 3600), ResolveMonth::cla
 
 - Find OpenSwoole's real ceiling (estimated ~10,000 users). Needs more than the 2000 seeded
   accounts: raise `--users` in the bench Dockerfile and `SEEDED_USERS` in `k6/users.js`.
+- **Re-run the database comparison** (SQLite vs Postgres vs MariaDB on the expenses bench): the
+  2026-10-16 numbers were all SQLite (dash ignored `env.sh`'s argument; fixed 2026-10-20).
 - Benchmark real MySQL 8 (the bench uses MariaDB because Debian has no MySQL 8 package), e.g.
   with the database in a second container sharing the CPU limit.
 - Run on a quiet machine or a real 2 vCPU VPS. The desktop used so far makes p99 noisy.

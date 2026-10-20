@@ -37,12 +37,15 @@ final class Console
             'make:stage' => ['Create app/Stages/<Name>.php', fn (array $a) => $this->make('Stages', $a[0] ?? null, 'stage')],
             'make:outlet' => ['Create app/Outlets/<Name>.php', fn (array $a) => $this->make('Outlets', $a[0] ?? null, 'outlet')],
             'make:provider' => ['Create app/Providers/<Name>.php', fn (array $a) => $this->make('Providers', $a[0] ?? null, 'provider')],
+            'make:factory' => ['Create database/factories/<Name>Factory.php', fn (array $a) => $this->makeIn('database/factories', 'Database\\Factories', isset($a[0]) ? preg_replace('/Factory$/', '', $a[0]) . 'Factory' : null, 'factory')],
+            'make:seeder' => ['Create database/seeders/<Name>.php', fn (array $a) => $this->makeIn('database/seeders', 'Database\\Seeders', $a[0] ?? null, 'seeder')],
             'make:job' => ['Create app/Jobs/<Name>.php (push it with Pype\\Queue\\Queue)', fn (array $a) => $this->make('Jobs', $a[0] ?? null, 'job')],
             'make:command' => ['Create app/Commands/<Name>.php (register it in a provider)', fn (array $a) => $this->make('Commands', $a[0] ?? null, 'command')],
             'make:migration' => ['Create database/migrations/<timestamp>_<name>.php [--sql for plain SQL]', $this->makeMigration(...)],
             'migrate' => ['Run pending migrations', $this->migrate(...)],
             'migrate:rollback' => ['Undo the last batch of migrations [--step=N: the last N instead]', $this->migrateRollback(...)],
-            'migrate:fresh' => ['Drop every table and run all migrations (development) [--force when APP_DEBUG is off]', $this->migrateFresh(...)],
+            'migrate:fresh' => ['Drop every table and run all migrations (development) [--seed] [--force when APP_DEBUG is off]', $this->migrateFresh(...)],
+            'db:seed' => ['Run database/seeders/DatabaseSeeder [--class=Name] [--force when APP_DEBUG is off] [seeder options]', $this->dbSeed(...)],
             'migrate:status' => ['Show which migrations have run', $this->migrateStatus(...)],
             'key:generate' => ['Set APP_KEY in .env (for signed URLs) [--show] [--force]', $this->keyGenerate(...)],
             'optimize' => ['Compile the route tables to ' . Application::ROUTE_CACHE . ' (run on deploy)', $this->optimize(...)],
@@ -212,6 +215,41 @@ final class Console
         foreach ($this->app->container->get(Migrator::class)->fresh() as $name) {
             echo "Migrated: {$name}\n";
         }
+
+        return (new Input($args))->flag('seed') ? $this->dbSeed([...$args, '--force']) : 0;
+    }
+
+    private function dbSeed(array $args): int
+    {
+        $in = new Input($args);
+
+        if (!$this->app->config('app.debug', false) && !$in->flag('force')) {
+            fwrite(STDERR, "db:seed writes to the database. APP_DEBUG is off (production?): add --force if you mean it.\n");
+
+            return 1;
+        }
+
+        $name = $in->option('class') ?? 'DatabaseSeeder';
+        $class = str_contains($name, '\\') ? $name : "Database\\Seeders\\{$name}";
+
+        if (!class_exists($class)) {
+            fwrite(STDERR, "No seeder class {$class} (database/seeders/{$name}.php).\n");
+
+            return 1;
+        }
+
+        $seeder = $this->app->container->get($class);
+
+        if (!$seeder instanceof \Pype\Database\Seeder) {
+            fwrite(STDERR, "{$class} must extend Pype\\Database\\Seeder.\n");
+
+            return 1;
+        }
+
+        $start = microtime(true);
+        $seeder->setContainer($this->app->container);
+        $seeder($in);
+        printf("Seeded: %s (%.1f s)\n", $name, microtime(true) - $start);
 
         return 0;
     }
@@ -571,6 +609,30 @@ final class Console
             PHP;
     }
 
+    /** make:* for files outside app/ (factories, seeders). */
+    private function makeIn(string $dir, string $namespace, ?string $name, string $kind): int
+    {
+        if ($name === null || !preg_match('/^[A-Z][A-Za-z0-9]*$/', $name)) {
+            fwrite(STDERR, "Give a StudlyCase class name, e.g. make:{$kind} User\n");
+
+            return 1;
+        }
+
+        $path = "{$this->app->basePath}/{$dir}/{$name}.php";
+
+        if (file_exists($path)) {
+            fwrite(STDERR, "Already exists: {$path}\n");
+
+            return 1;
+        }
+
+        @mkdir(dirname($path), 0777, true);
+        file_put_contents($path, $this->stub($kind, $namespace, $name));
+        echo "Created {$dir}/{$name}.php\n";
+
+        return 0;
+    }
+
     private function make(string $dir, ?string $name, string $kind): int
     {
         if ($name === null || !preg_match('/^[A-Z][A-Za-z0-9]*$/', $name)) {
@@ -674,6 +736,38 @@ final class Console
                     }
                 }
                 PHP,
+            'factory' => <<<PHP
+                use Pype\Database\Fake;
+                use Pype\Database\Factory;
+
+                /** {$class}::new(\$db)->create(), ->count(10)->create(), ->make(), ->insert() */
+                final class {$class} extends Factory
+                {
+                    protected string \$table = '{$this->snakePlural(substr($class, 0, -7))}';
+
+                    protected ?string \$class = null;   // e.g. \\App\\Data\\Thing::class to get objects back
+
+                    protected function definition(Fake \$fake): array
+                    {
+                        return [
+                            'name' => \$fake->words(2),
+                        ];
+                    }
+                }
+                PHP,
+            'seeder' => <<<PHP
+                use Pype\Database\Connection;
+                use Pype\Database\Seeder;
+
+                /** php bin/pype db:seed --class={$class} */
+                final class {$class} extends Seeder
+                {
+                    public function run(Connection \$db): void
+                    {
+                        // UserFactory::new(\$db)->count(10)->create();
+                    }
+                }
+                PHP,
             'provider' => <<<PHP
                 use Pype\Application;
                 use Pype\Provider;
@@ -688,6 +782,18 @@ final class Console
         };
 
         return "<?php\n\ndeclare(strict_types=1);\n\nnamespace {$namespace};\n\n{$body}\n";
+    }
+
+    /** OrderItem -> order_items */
+    private function snakePlural(string $class): string
+    {
+        $snake = strtolower(preg_replace('/(?<!^)[A-Z]/', '_$0', $class));
+
+        return match (true) {
+            str_ends_with($snake, 'y') && !preg_match('/[aeiou]y$/', $snake) => substr($snake, 0, -1) . 'ies',
+            preg_match('/(s|x|ch|sh)$/', $snake) === 1 => $snake . 'es',
+            default => $snake . 's',
+        };
     }
 
     /** @return array<string, string> */
