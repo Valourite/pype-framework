@@ -82,5 +82,6 @@ final class InsertJob
     public function handle(Connection $db): void
     {
         $db->table('ran')->insert(['job' => $this->id, 'pid' => getmypid()]);
+        usleep(200);   // a little work, so one fast worker can't drain the queue before the others start
     }
 }

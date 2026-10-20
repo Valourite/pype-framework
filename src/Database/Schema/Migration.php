@@ -16,11 +16,23 @@ namespace Pype\Database\Schema;
  *               $t->timestamps();
  *           });
  *       }
+ *
+ *       public function down(Schema $schema): void
+ *       {
+ *           $schema->dropIfExists('users');
+ *       }
  *   };
  *
- * The same file runs on SQLite, MySQL and Postgres. Forward-only, like .sql migrations.
+ * The same file runs on SQLite, MySQL and Postgres. down() undoes up() for
+ * `bin/pype migrate:rollback`; leave it out and the migration can't be rolled back.
  */
 abstract class Migration
 {
     abstract public function up(Schema $schema): void;
+
+    /** Undo up(). Not overriding it makes the migration irreversible (Migrator checks). */
+    public function down(Schema $schema): void
+    {
+        throw new \LogicException(static::class . ' has no down() method.');
+    }
 }

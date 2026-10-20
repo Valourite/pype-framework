@@ -41,6 +41,8 @@ final class Console
             'make:command' => ['Create app/Commands/<Name>.php (register it in a provider)', fn (array $a) => $this->make('Commands', $a[0] ?? null, 'command')],
             'make:migration' => ['Create database/migrations/<timestamp>_<name>.php [--sql for plain SQL]', $this->makeMigration(...)],
             'migrate' => ['Run pending migrations', $this->migrate(...)],
+            'migrate:rollback' => ['Undo the last batch of migrations [--step=N: the last N instead]', $this->migrateRollback(...)],
+            'migrate:fresh' => ['Drop every table and run all migrations (development) [--force when APP_DEBUG is off]', $this->migrateFresh(...)],
             'migrate:status' => ['Show which migrations have run', $this->migrateStatus(...)],
             'key:generate' => ['Set APP_KEY in .env (for signed URLs) [--show] [--force]', $this->keyGenerate(...)],
             'optimize' => ['Compile the route tables to ' . Application::ROUTE_CACHE . ' (run on deploy)', $this->optimize(...)],
@@ -163,8 +165,52 @@ final class Console
 
     private function migrateStatus(): int
     {
-        foreach ($this->app->container->get(Migrator::class)->status() as $name => $ran) {
-            printf("  [%s] %s\n", $ran ? 'x' : ' ', $name);
+        foreach ($this->app->container->get(Migrator::class)->status() as $name => $batch) {
+            printf("  [%s] %s%s\n", $batch !== null ? 'x' : ' ', $name, $batch !== null ? "  (batch {$batch})" : '');
+        }
+
+        return 0;
+    }
+
+    private function migrateRollback(array $args): int
+    {
+        $step = (new Input($args))->option('step');
+
+        if ($step !== null && !ctype_digit($step)) {
+            fwrite(STDERR, "--step must be a number.\n");
+
+            return 1;
+        }
+
+        try {
+            $rolledBack = $this->app->container->get(Migrator::class)->rollback($step === null ? null : (int) $step);
+        } catch (\RuntimeException $e) {
+            fwrite(STDERR, $e->getMessage() . "\n");
+
+            return 1;
+        }
+
+        foreach ($rolledBack as $name) {
+            echo "Rolled back: {$name}\n";
+        }
+
+        echo $rolledBack === [] ? "Nothing to roll back.\n" : '';
+
+        return 0;
+    }
+
+    private function migrateFresh(array $args): int
+    {
+        if (!$this->app->config('app.debug', false) && !(new Input($args))->flag('force')) {
+            fwrite(STDERR, "migrate:fresh drops every table. APP_DEBUG is off (production?): add --force if you mean it.\n");
+
+            return 1;
+        }
+
+        echo "Dropped all tables.\n";
+
+        foreach ($this->app->container->get(Migrator::class)->fresh() as $name) {
+            echo "Migrated: {$name}\n";
         }
 
         return 0;
@@ -471,7 +517,7 @@ final class Console
         $file = date('Y_m_d_His') . "_{$name}." . ($sql ? 'sql' : 'php');
 
         @mkdir($dir, 0777, true);
-        file_put_contents("{$dir}/{$file}", $sql ? "-- {$name}\n\n" : $this->migrationStub($name));
+        file_put_contents("{$dir}/{$file}", $sql ? "-- {$name}\n\n\n-- down\n\n" : $this->migrationStub($name));
         echo "Created {$file}\n";
 
         return 0;
@@ -486,11 +532,19 @@ final class Console
                             \$t->timestamps();
                         });
                 PHP;
+            $down = <<<PHP
+                        \$schema->dropIfExists('{$m[1]}');
+                PHP;
         } else {
             $table = preg_match('/_(?:to|from|in)_(\w+?)(?:_table)?$/', $name, $m) ? $m[1] : 'table_name';
             $body = <<<PHP
                         \$schema->table('{$table}', function (Table \$t) {
                             //
+                        });
+                PHP;
+            $down = <<<PHP
+                        \$schema->table('{$table}', function (Table \$t) {
+                            // undo up(), e.g. \$t->dropColumn('...');
                         });
                 PHP;
         }
@@ -506,6 +560,11 @@ final class Console
                 public function up(Schema \$schema): void
                 {
             {$body}
+                }
+
+                public function down(Schema \$schema): void
+                {
+            {$down}
                 }
             };
 

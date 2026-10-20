@@ -25,7 +25,7 @@ final class DatabaseTest extends TestCase
         $migrator = new Migrator($this->db, __DIR__ . '/../fixtures/migrations');
 
         $this->assertSame([], $migrator->migrate());
-        $this->assertSame(['2026_01_01_000000_create_items' => true], $migrator->status());
+        $this->assertSame(['2026_01_01_000000_create_items' => 1], $migrator->status());   // ran in batch 1
     }
 
     public function test_query_builder_reads(): void

@@ -312,7 +312,7 @@ final class QueryBuilder
         return $this->aggregate('MAX', $column, numeric: false);
     }
 
-    /** @param array<string, mixed> $values  @return string the new row id */
+    /** @param array<string, mixed> $values  @return string the new row's id ('' on Postgres when the table has no id column) */
     public function insert(array $values): string
     {
         if ($values === []) {
@@ -322,10 +322,17 @@ final class QueryBuilder
         $columns = implode(', ', array_map($this->col(...), array_keys($values)));
         $placeholders = implode(', ', array_fill(0, count($values), '?'));
 
-        $this->db->execute(
-            'INSERT INTO ' . $this->col($this->table) . " ({$columns}) VALUES ({$placeholders})",
-            array_values($values),
-        );
+        $sql = 'INSERT INTO ' . $this->col($this->table) . " ({$columns}) VALUES ({$placeholders})";
+
+        // Postgres: PDO's lastInsertId() is LASTVAL(), which fails (and aborts the transaction)
+        // when the table has no sequence. RETURNING gives the id without that trap.
+        if ($this->db->driver() === 'pgsql') {
+            $row = $this->db->first("{$sql} RETURNING *", array_values($values));
+
+            return isset($row['id']) ? (string) $row['id'] : '';
+        }
+
+        $this->db->execute($sql, array_values($values));
 
         return $this->db->lastInsertId();
     }

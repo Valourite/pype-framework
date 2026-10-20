@@ -54,6 +54,38 @@ final class Schema
         $this->db->statement('DROP TABLE IF EXISTS ' . $this->db->quote($table));
     }
 
+    /** Drop every table and view in the database (the current schema on Postgres). Everything in them is lost. */
+    public function dropAllTables(): void
+    {
+        $db = $this->db;
+        $driver = $db->driver();
+
+        if ($driver === 'sqlite') {
+            $db->statement('PRAGMA foreign_keys = OFF');
+            foreach ($db->select("SELECT type, name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'") as $row) {
+                $db->statement('DROP ' . strtoupper($row['type']) . ' IF EXISTS ' . $db->quote($row['name']));
+            }
+            $db->statement('PRAGMA foreign_keys = ON');
+
+            return;
+        }
+
+        $schema = $driver === 'mysql' ? 'DATABASE()' : 'current_schema()';
+        $rows = $db->select("SELECT table_name AS name, table_type AS type FROM information_schema.tables WHERE table_schema = {$schema}");
+
+        if ($driver === 'mysql') {
+            $db->statement('SET FOREIGN_KEY_CHECKS = 0');
+        }
+
+        foreach ($rows as $row) {
+            $db->statement(($row['type'] === 'VIEW' ? 'DROP VIEW IF EXISTS ' : 'DROP TABLE IF EXISTS ') . $db->quote($row['name']) . ($driver === 'pgsql' ? ' CASCADE' : ''));
+        }
+
+        if ($driver === 'mysql') {
+            $db->statement('SET FOREIGN_KEY_CHECKS = 1');
+        }
+    }
+
     public function raw(string $sql): void
     {
         $this->db->statement($sql);

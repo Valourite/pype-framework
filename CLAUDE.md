@@ -10,9 +10,10 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.6.0 (tagged; push only when the owner says): job queue + scheduler. 0.5.0
-  (on Packagist): validation rules, mail, password reset + email verification, encryption,
-  "remember me", cache.
+- **Released:** 0.7.0 (framework + skeleton on Packagist): migration rollback (`down()`,
+  batches, `migrate:rollback`, `migrate:fresh`) and the Postgres `insert()` fix (0.6.0 and
+  earlier can't `migrate` a fresh Postgres database). 0.6.0: job queue + scheduler. 0.5.0:
+  validation rules, mail, password reset + email verification, encryption, remember me, cache.
 - **Next:** not decided (Tier 2 in `docs/ROADMAP.md`). Route caching is a parked idea there
   ("Idea to circle back to").
 - **Example app:** `../expenses` (local git repo only, never give it a remote). Its bench is in
@@ -153,6 +154,13 @@ symlinks this checkout into the app's `vendor/`.
   (`--time="2026-10-21 00:05 Africa/Johannesburg"`) when testing a task by hand.
 - The Docker test image is tagged `pype-test-php:<php>-2`; bump the suffix whenever its
   Dockerfile in `bin/test-databases.sh` changes (otherwise the cached image is reused).
+- **Postgres: never call PDO `lastInsertId()` blindly.** It is `LASTVAL()`, which fails on a
+  table without a sequence and aborts the open transaction. `QueryBuilder::insert()` uses
+  `RETURNING *` on Postgres. Tests that insert into a serial table first hide this (they did).
+- **MySQL indexes foreign key columns itself.** An explicit index on such a column replaces
+  MySQL's and then can't be dropped ("needed in a foreign key constraint"), so a `down()` that
+  drops it fails there. Round-trip migrations (`migrate:fresh` → `migrate:rollback --step=100`
+  → `migrate`) on all three databases before trusting a `down()`.
 - Sessions are only written when their data changed or every `session.touch` seconds.
 - Load testing with k6: needs `noCookiesReset` + `redirects: 0` (or browser users silently log
   out), and a 60 s `gracefulStop` (or requests cut off at the end show up as timeouts).

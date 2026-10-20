@@ -20,6 +20,9 @@ anything big.
   `ARCHITECTURE.md` under "Route matching". Also named routes with group prefixes, `url()` /
   `Urls`, signed URLs (`signed_url()`, `ValidateSignature`, `APP_KEY` + `key:generate`), names in
   `bin/pype routes`.
+- **0.7.0** (2026-10-20): migration rollback (`down()`, `-- down` in `.sql`, batches,
+  `migrate:rollback [--step=N]`, `migrate:fresh`, `Schema::dropAllTables()`); fix: `migrate` (and
+  any `insert()` into a table without a sequence) failed on a fresh Postgres database.
 - **0.6.0** (2026-10-20): database job queue (`Pype\Queue`: `push`/`later`, retries with backoff,
   timeouts, failed jobs, `queue:work`/`restart`/`failed`/`retry`/`forget`, `Mailer::queue()`,
   `make:job`) and the scheduler (`Pype\Schedule`, `routes/schedule.php`, own cron parser,
@@ -71,7 +74,7 @@ $router->get('/dashboard', ['auth', new CacheRoute(ttl: 3600), ResolveMonth::cla
 
 ## Tier 2: speed and growing apps
 
-- Seeders and test factories; migration rollback (`down()`); multiple database connections.
+- Seeders and test factories; multiple database connections.
 - Thin HTTP client (curl). Translations (`intl` `MessageFormatter`).
 
 ## Tier 3: later

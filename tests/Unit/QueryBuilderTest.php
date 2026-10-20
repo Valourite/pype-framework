@@ -139,4 +139,18 @@ final class QueryBuilderTest extends TestCase
         $this->expectException(LogicException::class);
         $this->db->table('expenses as e')->join('categories as c', 'c.id', '=', 'e.category_id')->delete();
     }
+
+    public function test_insert_into_a_table_without_an_id_inside_a_transaction(): void
+    {
+        // Postgres' lastInsertId() is LASTVAL(): it used to fail here and abort the transaction.
+        $db = \Pype\Tests\Support\TestDatabase::fresh();
+        $db->statement('CREATE TABLE plain (name VARCHAR(20) PRIMARY KEY)');
+
+        $db->transaction(function ($db) {
+            $db->table('plain')->insert(['name' => 'a']);
+            $db->table('plain')->insert(['name' => 'b']);
+        });
+
+        $this->assertSame(2, $db->table('plain')->count());
+    }
 }
