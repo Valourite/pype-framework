@@ -48,6 +48,12 @@ final class Table
         return $this->add($name, 'text');
     }
 
+    /** Text that may be large (LONGTEXT on MySQL, whose TEXT stops at 64 KB; TEXT elsewhere). */
+    public function longText(string $name): Column
+    {
+        return $this->add($name, 'longText');
+    }
+
     public function integer(string $name): Column
     {
         return $this->add($name, 'integer');

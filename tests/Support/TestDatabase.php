@@ -100,4 +100,18 @@ final class TestDatabase
 
         return $db;
     }
+
+    /** The cache table, as the skeleton's migration creates it. */
+    public static function withCacheTable(): Connection
+    {
+        $db = self::fresh();
+
+        (new Schema($db))->create('cache', function (Table $t) {
+            $t->string('key')->primary();
+            $t->longText('value');
+            $t->bigInteger('expires_at')->nullable()->index();
+        });
+
+        return $db;
+    }
 }

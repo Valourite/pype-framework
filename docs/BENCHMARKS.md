@@ -68,3 +68,27 @@ All runs combined in `expenses/bench/results/combined-fpm-vs-swoole/report.txt`.
 - Memory grows with users for both (sessions and SQLite in page cache, more connections). OpenSwoole's isn't a leak: the worker-safety test shows flat PHP memory.
 - **The small "errors" at 3000+ users (0.01–0.07%) are a k6 artifact, not the servers.** k6 stopped the test 30 s after the end and cut off users mid-visit, reporting their in-flight requests as timeouts. That's why they grew with user count and hit FPM and OpenSwoole equally. A debug run proved it: all hung requests timed out in the test's final second, and the kernel showed no drops. With `gracefulStop`/`gracefulRampDown` = 60 s (now in `k6/users.js`), the same load gave **0** failures. Runs before 2026-10-19 don't have this fix.
 
+## Micro-benchmarks
+
+### Cache stores (2026-10-19, `bin/bench-cache.sh`)
+
+Micro-benchmark, one process, PHP 8.3 in Docker with opcache + APCu, 20,000 calls each over a
+working set of 100 keys, value ~420 bytes serialized (an array). µs per call through `Cache`
+(key check + prefix included). Three runs, spread ≤ 0.05 µs except file set (±0.3).
+
+| Store | get hit | get miss | set |
+|---|---|---|---|
+| array | 0.13 | 0.10 | 0.14 |
+| apcu | 0.42 | 0.11 | 0.44 |
+| file, served by opcache | 1.35 | 0.68 | 23 |
+| file, compiled each read | 5.4 | 0.68 | 23 |
+| sqlite (on disk, WAL) | 2.6 | 1.8 | 6.6 |
+
+- **Opcache only serves a cache file once it is older than the request** (`opcache.file_update_protection`,
+  2 s by default, measured against the request's start). Under PHP-FPM that means from the next
+  request on. A CLI run is one long "request", so there file hits never come from opcache (the
+  5.4 µs row, measured); an **OpenSwoole worker** should behave the same (not measured) unless `opcache.file_update_protection=0`, which is
+  safe for this store because files appear by atomic `rename()`. The bench sets it.
+- File `set` is the slowest (a temp file, `rename()`, `opcache_invalidate()`); caches are read
+  far more than written. sqlite here has no network; MySQL/Postgres add a round trip (~50–200 µs).
+- Not measured: hit rates under load, or the effect on the expenses load test.

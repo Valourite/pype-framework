@@ -149,4 +149,14 @@ final class SchemaTest extends TestCase
         array_map('unlink', glob("{$dir}/*"));
         rmdir($dir);
     }
+
+    public function test_long_text_is_longtext_only_on_mysql(): void
+    {
+        $sql = fn (string $driver) => (new Schema($driver === 'sqlite' ? Connection::sqlite() : new Connection(['driver' => $driver, 'database' => 'x'])))
+            ->toSql('cache', fn (Table $t) => $t->longText('value'));
+
+        $this->assertStringContainsString('"value" TEXT NOT NULL', $sql('sqlite'));
+        $this->assertStringContainsString('`value` LONGTEXT NOT NULL', $sql('mysql'));
+        $this->assertStringContainsString('"value" TEXT NOT NULL', $sql('pgsql'));
+    }
 }

@@ -20,62 +20,54 @@ anything big.
   `ARCHITECTURE.md` under "Route matching". Also named routes with group prefixes, `url()` /
   `Urls`, signed URLs (`signed_url()`, `ValidateSignature`, `APP_KEY` + `key:generate`), names in
   `bin/pype routes`.
-- **Unreleased**: validation rules: `unique`/`exists` (+ `Unique`/`Exists` objects, `{param}`
-  from the route), dates (`before`/`after`...), `items.*` wildcards and dot paths, `required_if`/
-  `required_with`, `regex`, `same`/`different`, `between`, `digits`, `alpha*`, `uuid`, `ip`, `json`,
-  `accepted`, `not_in`; closures get `($value, $field, $data)`; `Rule` interface; custom messages.
-- **Unreleased**: `Security\Encrypter` (libsodium, APP_KEY, key rotation); "remember me"
-  (`Auth\RememberTokens`, a table per device, selector + validator, rotation, replay detection;
-  `SessionGuard::login(..., remember: true)`).
-- **Unreleased**: password reset core (`Auth\PasswordResets`), email verification
-  (`Auth::markEmailVerified/isEmailVerified/emailHash`, `EnsureEmailIsVerified`); the flows,
-  emails and pages live in the skeleton.
-- **Unreleased**: mail (`Message`, `Mail` classes, `Mailer::send()` / `later()`, PHPMailer
-  SMTP/sendmail/mail, log/array/null transports) and `AfterResponse` + `Application::terminate()`.
+- **0.5.0** (2026-10-20):
+  - validation rules: `unique`/`exists` (+ `Unique`/`Exists` objects, `{param}` from the route), dates (`before`/`after`...), `items.*` wildcards and dot paths, `required_if`/`required_with`, `regex`, `same`/`different`, `between`, `digits`, `alpha*`, `uuid`, `ip`, `json`, `accepted`, `not_in`; closures get `($value, $field, $data)`; `Rule` interface; custom messages.
+  - `Security\Encrypter` (libsodium, APP_KEY, key rotation); "remember me" (`Auth\RememberTokens`, a table per device, selector + validator, rotation, replay detection; `SessionGuard::login(..., remember: true)`).
+  - cache (`Pype\Cache`, PSR-16): `remember`/`add`/`increment`/`pull`/`forever`, prefix-limited `clear()`; file (default), APCu, database, array, null stores; locks, `stale()` background refresh, groups with one-write `flush()`; `bin/pype cache:clear`; `Table::longText()`.
+  - password reset core (`Auth\PasswordResets`), email verification (`Auth::markEmailVerified/isEmailVerified/emailHash`, `EnsureEmailIsVerified`); the flows, emails and pages live in the skeleton.
+  - mail (`Message`, `Mail` classes, `Mailer::send()` / `later()`, PHPMailer SMTP/sendmail/mail, log/array/null transports) and `AfterResponse` + `Application::terminate()`.
 - **0.4.0**: logging (PSR-3 `Logger`, JSON lines, request log, forwarding to stderr/syslog/any PSR-3 logger), the live log viewer, the
   development error page, `HtmlOutlet`.
 
-## Next: cache (agreed 2026-10-19, not started)
+## Next: `schedule:run` + job queue
 
-The last Tier 1 item. Scope and decisions agreed with the owner; plan it in plan mode before building.
+The cache round finished Tier 1 (released in 0.5.0). Next, agreed 2026-10-20: the first Tier 2
+item, scheduling and a database-backed queue, as one round. To be planned in plan mode.
 
-**Core** (`Pype\Cache`, implements **PSR-16**: add `psr/simple-cache` ^3, interfaces only):
-- `get`, `set($key, $value, $ttl)`, `delete`, `has`, `getMultiple`/`setMultiple`/`deleteMultiple` (PSR-16)
-- `remember($key, $ttl, fn)`, `add($key, $value, $ttl)` (only if missing, atomic), `increment`/`decrement`,
-  `forever`, `pull`; `clear()` removes only pype's keys (a configurable prefix)
-- `CacheProvider` + `config/cache.php` (`CACHE_DRIVER`, prefix, path, table); `bin/pype cache:clear`
+Left out of the cache round on purpose: query-builder `->remember()` (couples DB and cache);
+cache events/stats.
 
-**Drivers:**
+## Idea to circle back to: route caching (discussed 2026-10-20, not planned)
 
-| Driver | Notes |
-|---|---|
-| `file` (**default**) | one PHP file per key written so opcache serves reads (`var_export`), atomic tmp+rename writes, expiry stored in the file. Decide how to store objects (var_export can't do readonly data classes without `__set_state`; maybe `serialize` for those, the cache dir being as trusted as code) |
-| `apcu` (**recommended in the docs**) | `apcu_fetch/store/add/inc/delete`, `APCUIterator` over the prefix for clear. ~60 lines, same pattern as `RateLimit\ApcuRateLimiter` |
-| `database` | `cache` table (key PK, value, expires_at), one atomic upsert per write on SQLite/MySQL/Postgres (same SQL as `DatabaseRateLimiter`); skeleton migration |
-| `array` / `null` | tests / off |
+Replaces the earlier "whole-page caching for guests only" idea. The owner's direction: **one
+stage caches the whole route's finished output per user**, so apps don't cache stage by stage.
 
-**APCu caveats to document** (the owner asked for these):
-1. The CLI has its own APCu memory: under PHP-FPM, `bin/pype cache:clear` can't clear the site's cache. For apcu it must say so instead of pretending; clear by reloading FPM (deploys do). OpenSwoole: restart.
-2. Per server (file is too); use `database` (or Redis later) to share across servers.
-3. `apc.shm_size` (32 MB default): full = old entries evicted.
-4. Install `pecl install apcu` / `apt install php-apcu`; `apc.enable_cli=1` for CLI use; missing extension = clear error.
+```php
+$router->get('/dashboard', ['auth', new CacheRoute(ttl: 3600), ResolveMonth::class, MonthSummary::class, Dashboard::class]);
+```
 
-**Extras in the same round:**
-1. **Locks:** `$cache->lock('send-invoices', 60)->run(fn () => ...)`, on atomic `add()`, every driver.
-2. **Background refresh:** `$cache->stale($key, fresh: 60, stale: 600, fn)`: fresh → cached value; stale → old value
-   now and recompute after the response via `Http\AfterResponse` (like `Mailer::later()`), guarded by a lock so only
-   one process recomputes.
-3. **Groups:** `$cache->group("user:{$id}")->remember(...)` / `->flush()`, a version number per group (flush = one
-   increment, old keys just stop being read).
-
-**Separate later round:** `new CacheResponse(ttl: 60)` whole-page caching stage (guests only, 200s, never with
-cookies/sessions, keyed by path + query + format) with its own benchmark.
-
-**Left out on purpose:** query-builder `->remember()` (couples DB and cache); cache events/stats.
-
-Verify like previous rounds: tests per driver (DB driver via `bin/test-databases.sh`, apcu where the extension is
-on), a per-driver get/set benchmark, worker-safety (no request state in the cache service), docs in ARCHITECTURE,
-README (framework + skeleton), ROADMAP, CLAUDE.md.
+- **What is cached:** the final output (status, headers, rendered body), not the handler's data.
+  Reason: views can do work of their own (expenses' `Dashboard::data()` runs two more queries)
+  and read context that skipped stages would have put there (`Month`). Needs a small core hook
+  so the stage can store the body after the outlet renders (outlets render after the pipeline).
+- **Placement:** after `auth` (the key needs the user). Stages before it still run on a hit
+  (session, auth); everything after it is skipped (stages, handler, outlet).
+- **Key:** route + path + query + output format + user (or a shared "guest" key on public pages
+  without a session, which is the old whole-page idea as a special case).
+- **'web' traps, handled by the stage:** the CSRF token is per session (two devices = two
+  tokens), so include it in the key; skip the cache when the session has flash data, old input
+  or validation errors; never store non-200s, redirects, responses setting cookies, downloads.
+- **Staleness:** TTL as the backstop; entries in the user's cache group (`user.{id}`), which
+  apps already flush on writes (expenses does); optionally flush a user's group automatically
+  after any successful POST/PUT/PATCH/DELETE by that user (covers their own changes, not changes
+  by others or cron).
+- **Costs:** storage grows with users × pages × query variants (TTL bounds it); only worth it
+  where reads outnumber changes. Gain unmeasured: benchmark the expenses dashboard before/after.
+- **Open questions:** auto-flush on writes default on / opt-in / none; the name (`CacheRoute`,
+  `CachePage`, `CacheResponse`); which expenses pages get it.
+- **Considered and parked:** "holes" (donut caching: one shared shell, per-user parts filled
+  per request, pype's own `csrf()`/`old()`/`error()`/flash as automatic holes, a debug-mode leak
+  check). Only pays off on pages with a heavy shared part; one forgotten hole leaks a user's data.
 
 ## Tier 2: speed and growing apps
 

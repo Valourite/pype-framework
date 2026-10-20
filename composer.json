@@ -7,11 +7,12 @@
         "php": ">=8.2",
         "ext-pdo": "*",
         "psr/container": "^2.0",
-        "psr/log": "^3.0"
+        "psr/log": "^3.0",
+        "psr/simple-cache": "^3.0"
     },
     "suggest": {
         "ext-openswoole": "Run pype as a long-running OpenSwoole server (APP_SERVER=swoole)",
-        "ext-apcu": "In-memory rate limit counters (RATE_LIMIT_DRIVER=apcu)",
+        "ext-apcu": "In-memory cache and rate limit counters (CACHE_DRIVER=apcu, RATE_LIMIT_DRIVER=apcu)",
         "phpmailer/phpmailer": "Send mail over SMTP, sendmail or mail() (MAIL_DRIVER=smtp|sendmail|mail)"
     },
     "require-dev": {
@@ -33,7 +34,7 @@
     },
     "extra": {
         "branch-alias": {
-            "dev-main": "0.4.x-dev"
+            "dev-main": "0.5.x-dev"
         }
     },
     "scripts": {

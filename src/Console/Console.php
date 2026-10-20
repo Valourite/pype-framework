@@ -6,6 +6,8 @@ namespace Pype\Console;
 
 use Closure;
 use Pype\Application;
+use Pype\Cache\Cache;
+use Pype\Cache\Store;
 use Pype\Database\Migrator;
 use Pype\Pipeline\Invoker;
 use Pype\Routing\Router;
@@ -34,6 +36,7 @@ final class Console
             'key:generate' => ['Set APP_KEY in .env (for signed URLs) [--show] [--force]', $this->keyGenerate(...)],
             'optimize' => ['Compile the route tables to ' . Application::ROUTE_CACHE . ' (run on deploy)', $this->optimize(...)],
             'optimize:clear' => ['Remove the compiled route tables', $this->optimizeClear(...)],
+            'cache:clear' => ['Remove everything in the cache (keys with the cache prefix)', $this->cacheClear(...)],
         ];
 
         foreach ($app->commands() as $name => [$description, $handler]) {
@@ -191,6 +194,29 @@ final class Console
         }
 
         printf("Compiled %d routes to %s\n", count($this->app->router->routes()), Application::ROUTE_CACHE);
+
+        return 0;
+    }
+
+    private function cacheClear(): int
+    {
+        // Store is an interface, so has() is only true once CacheProvider has bound it.
+        if (!$this->app->container->has(Store::class)) {
+            fwrite(STDERR, "No cache: register Pype\\Cache\\CacheProvider in config/app.php.\n");
+
+            return 1;
+        }
+
+        // APCu memory belongs to the process group: the CLI's is not PHP-FPM's or OpenSwoole's.
+        if ($this->app->config('cache.driver') === 'apcu') {
+            echo "CACHE_DRIVER=apcu: the CLI can't reach the web server's APCu memory.\n"
+                . "Clear it by reloading PHP-FPM (e.g. `systemctl reload php8.4-fpm`; deploys usually do) or restarting OpenSwoole.\n";
+
+            return 0;
+        }
+
+        $this->app->container->get(Cache::class)->clear();
+        echo "Cache cleared.\n";
 
         return 0;
     }

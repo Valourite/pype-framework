@@ -10,12 +10,10 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.4.0 (framework + skeleton on Packagist).
-- **Unreleased, committed on `main` (not pushed):** validation rules, mail, password reset + email
-  verification, encryption, "remember me". The skeleton's `main` uses these, so **push/tag the
-  framework (0.5.0) before the skeleton**, then bump the skeleton to `^0.5` (see Releasing).
-- **Next:** cache, agreed in detail in `docs/ROADMAP.md` ("Next: cache"). Then the whole-page
-  caching stage as its own round, then Tier 2.
+- **Released:** 0.5.0 (framework + skeleton on Packagist): validation rules, mail, password
+  reset + email verification, encryption, "remember me", cache.
+- **Next:** `schedule:run` + job queue (Tier 2 in `docs/ROADMAP.md`). Route caching is a parked
+  idea there ("Idea to circle back to").
 - **Example app:** `../expenses` (local git repo only, never give it a remote). Its bench is in
   `bench/` (see `docs/BENCHMARKS.md`).
 
@@ -38,8 +36,8 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 4. **Nothing costs anything unless it's used.** A feature that isn't configured must not be
    loaded, connect, or run per request (e.g. `SwooleServer`, the schema builder, rate-limit
    drivers are only autoloaded when picked). Measure when in doubt (`docs/BENCHMARKS.md`).
-5. **No runtime dependencies** except PSR interface packages (`psr/container` today; `psr/log` and
-   `psr/simple-cache` planned). Security-sensitive protocols (mail) use a package behind a pype
+5. **No runtime dependencies** except PSR interface packages (`psr/container`, `psr/log`,
+   `psr/simple-cache`). Security-sensitive protocols (mail) use a package behind a pype
    interface, as an optional `suggest`; dev-only tools (e.g. whoops) go in `require-dev`. See
    "Build or use a package?" in `docs/ROADMAP.md`.
 6. **Worker-safe.** Apps may run under OpenSwoole, where one `Application` serves many
@@ -62,6 +60,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 | `src/Auth/` | `Auth` (users, passwords, API tokens), `Authenticate` stage, guards |
 | `src/Session/` | session stages (`'web'` stack), `Session`, stores (database/file/array) |
 | `src/Database/` | `Connection` (PDO), `QueryBuilder`, `Page`, `Migrator`, `Schema/` (builder) |
+| `src/Cache/` | `Cache` (PSR-16 + remember/add/increment, `lock()`, `stale()`, `group()`), `Store` + file/apcu/database/array/null, `Lock`, `CacheProvider` |
 | `src/RateLimit/` | `RateLimiter` + database/apcu/array drivers (used by `Stages\Throttle`) |
 | `src/Stages/` | built-in stages: Cors, JsonBody, MethodOverride, RequestId, Throttle |
 | `src/Log/` | `Logger` (PSR-3, JSON lines), `LogReader`, `LogRequests`, `LogReporter`, `LogViewer` + `views/viewer.php`, `LogProvider` |
@@ -82,7 +81,8 @@ by a config string, or a class name (see `SessionProvider`, `DatabaseProvider` r
 ```bash
 composer install
 vendor/bin/phpunit                 # SQLite in memory, ~3 s
-bin/test-databases.sh              # same suite on SQLite, MySQL 8.4, Postgres 17 (Docker)
+bin/test-databases.sh              # same suite on SQLite, MySQL 8.4, Postgres 17 (Docker), APCu on
+bin/bench-cache.sh                 # cache store micro-benchmark (Docker image from test-databases.sh)
 DBS=pgsql bin/test-databases.sh    # one database
 PHP=8.2 DBS=sqlite bin/test-databases.sh   # another PHP version (CI runs 8.2-8.4)
 ```
@@ -133,6 +133,13 @@ symlinks this checkout into the app's `vendor/`.
 - Portability: MySQL rejects non-aggregated columns not in GROUP BY; MySQL/Postgres return raw
   `SUM()` as strings; Postgres can't use select aliases in HAVING; MySQL ignores inline
   `REFERENCES` (the schema builder emits table-level foreign keys).
+- **Opcache won't cache a file changed after the current request started**
+  (`opcache.file_update_protection`). `FileStore` hits come from opcache under PHP-FPM from the
+  next request on, but never in a CLI run (measured) and, by the same rule, not in an OpenSwoole
+  worker (one long request; not measured) unless `opcache.file_update_protection=0`. Benchmarks of the file store must set it.
+- `Cache::group()` objects keep the version they were made with; the root `Cache` singleton has
+  no mutable state. Don't add any (worker safety), and don't store group objects in services.
+- APCu's `apcu_delete()` returns false for a missing key; PSR-16 `delete()` must still return true.
 - Sessions are only written when their data changed or every `session.touch` seconds.
 - Load testing with k6: needs `noCookiesReset` + `redirects: 0` (or browser users silently log
   out), and a 60 s `gracefulStop` (or requests cut off at the end show up as timeouts).

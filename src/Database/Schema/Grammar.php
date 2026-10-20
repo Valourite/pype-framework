@@ -123,6 +123,7 @@ final class Grammar
             },
             'string' => "VARCHAR({$column->args['length']})",
             'text' => 'TEXT',
+            'longText' => $d === 'mysql' ? 'LONGTEXT' : 'TEXT',
             'integer' => 'INTEGER',
             'bigInteger' => 'BIGINT',
             'boolean' => match ($d) {

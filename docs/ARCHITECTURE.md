@@ -149,6 +149,37 @@ response is on its way: `run()` calls it after `fastcgi_finish_request()` (PHP-F
 OpenSwoole server after writing the response, `TestClient` right after `handle()`. A failing
 callback is reported and doesn't stop the others; outside a request, `later()` sends at once.
 
+## Cache
+
+`Cache\CacheProvider` (from `config/cache.php`) binds a `Cache\Store` and `Cache\Cache` (also as
+`Psr\SimpleCache\CacheInterface`); nothing is built until something asks for it. `Cache` does
+key validation (PSR-16: `{}()/\@:` reserved, so apps use dots), the prefix, TTL handling (seconds,
+`DateInterval`, null = forever, ≤ 0 deletes) and everything above the store; a `Store` only
+knows six operations: `fetch` (found + value, so null is cacheable), `put`, atomic `add`,
+`increment`, `forget`, `flush(prefix)`.
+
+| Store | How |
+|---|---|
+| `FileStore` (default) | one `sha256(key).php` file per key returning `[expiresAt, value]`; scalars/arrays via `var_export` (opcache serves hits from memory), objects via `serialize()`. tmp + `rename()` writes, `opcache_invalidate()` on write/forget. `add`/`increment` hold one of 16 striped `flock`s. Line 1 holds the base64 key so `flush(prefix)` can be prefix-exact |
+| `ApcuStore` | `apcu_fetch/store/add/inc/delete`, `APCUIterator` for flush; native TTLs |
+| `DatabaseStore` | `cache(key, value, expires_at)`; ints as digits (so `increment` is SQL), the rest `base64(serialize())`. `put` = one upsert; `add` = one upsert whose update only fires on an expired row (`WHERE` / MySQL `IF()`), so it's atomic without retries; `increment` = upsert + `RETURNING` (MySQL: transaction + read back). Keys over 255 chars keep 190 chars + a hash |
+| `ArrayStore` / `NullStore` | tests / off |
+
+Built on top, in `Cache`:
+- **Locks** (`Cache\Lock`): `add("lock.{name}", ownerToken, seconds)`; `release()` only deletes
+  while the stored token is still ours; `run()` = get → try/finally release.
+- **`stale($key, fresh, stale, fn)`**: stores `['pype.stale' => value, 'fresh' => until]` for
+  fresh + stale seconds. When stale, it takes `lock("refresh.{key}")` and pushes the recompute
+  onto `Http\AfterResponse` (current request from a container closure, as `Mailer` does); no
+  request → recompute now.
+- **Groups**: `group($name)` returns a `Cache` with prefix `{prefix}group.{name}.v{n}.`, where `n`
+  is the integer at `groupver.{name}`. `flush()` increments it: one write, old keys are never
+  read again and expire. A missing version starts at a random number, so an evicted version key
+  can't bring old entries back.
+
+The root `Cache` is a singleton with no mutable state (only group objects, made per call, move
+to the new version on `flush()`), so it is worker-safe; `CacheTest` checks this.
+
 ## Stacks
 
 Named lists of stages registered by providers or apps: `$app->stack('web', [...])`, used in
@@ -191,7 +222,7 @@ APP_KEY, a random nonce per value, JSON (never unserialize), `pype1.` + URL-safe
 `Application` holds a PSR-11 `Container` (autowiring; `singleton`, `bind`, `instance`).
 Providers (listed in `config/app.php`) bind services from config: `DatabaseProvider`
 (`Connection`, `Migrator`, `RateLimiter`), `AuthProvider`, `SessionProvider` (`SessionStore`,
-`'web'`), `ViewProvider`. Swappable backends follow one pattern: an interface, drivers chosen by
+`'web'`), `ViewProvider`, `MailProvider`, `CacheProvider`. Swappable backends follow one pattern: an interface, drivers chosen by
 a config string, or your own class name.
 
 Services must be stateless across requests (see the worker-safety principle in `CLAUDE.md`).
