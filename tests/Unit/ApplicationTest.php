@@ -71,4 +71,33 @@ final class ApplicationTest extends TestCase
         $this->assertSame('', $res->body());
         $this->assertInstanceOf(Response::class, $res->response());
     }
+
+    public function test_container_uses_defaults_for_optional_dependencies_it_cannot_build(): void
+    {
+        $made = (new \Pype\Container\Container())->get(OptionalDeps::class);
+
+        $this->assertNull($made->callback);
+        $this->assertNull($made->stage);
+        $this->assertInstanceOf(\Pype\Container\Container::class, $made->container);
+
+        $this->expectException(\Pype\Container\ContainerException::class);
+        (new \Pype\Container\Container())->get(RequiredDep::class);
+    }
+}
+
+final class OptionalDeps
+{
+    public function __construct(
+        public readonly \Pype\Container\Container $container,
+        public readonly ?\Closure $callback = null,
+        public readonly ?\Pype\Pipeline\Stage $stage = null,
+    ) {
+    }
+}
+
+final class RequiredDep
+{
+    public function __construct(public readonly \Pype\Pipeline\Stage $stage)
+    {
+    }
 }

@@ -31,15 +31,18 @@ class Validate implements Stage, ContainerAware
     // Defaults, not promoted: subclasses with their own constructor don't have to call parent's.
     private array $rules = [];
     private array $messages = [];
+    private int $status = 422;
 
     /**
      * @param array<string, string|list<string|Rule|Closure>> $rules
      * @param array<string, string>                            $messages "field.rule", "field" or "rule" => message
+     * @param int                                              $status   of the error response (422, or e.g. 400 if your API says so)
      */
-    public function __construct(array $rules = [], array $messages = [])
+    public function __construct(array $rules = [], array $messages = [], int $status = 422)
     {
         $this->rules = $rules;
         $this->messages = $messages;
+        $this->status = $status;
     }
 
     public function setContainer(ContainerInterface $container): void
@@ -59,6 +62,12 @@ class Validate implements Stage, ContainerAware
         return $this->messages;
     }
 
+    /** The error response's status. Override in subclasses (default 422). */
+    protected function status(): int
+    {
+        return $this->status;
+    }
+
     /** Which input to validate: the body plus uploaded files. Override to validate query params instead. */
     protected function data(Request $request): array
     {
@@ -72,7 +81,7 @@ class Validate implements Stage, ContainerAware
         [$validated, $errors] = Validator::validate($this->data($request), $rules, $this->messages(), $this->connection());
 
         if ($errors !== []) {
-            throw HttpException::unprocessable($errors);
+            throw (new HttpException($this->status(), 'Validation failed', ['errors' => $errors]))->withKey('validation');
         }
 
         $request->context()->put(new ValidatedInput($validated));

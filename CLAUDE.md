@@ -14,6 +14,10 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
   batches, `migrate:rollback`, `migrate:fresh`) and the Postgres `insert()` fix (0.6.0 and
   earlier can't `migrate` a fresh Postgres database). 0.6.0: job queue + scheduler. 0.5.0:
   validation rules, mail, password reset + email verification, encryption, remember me, cache.
+- **Unreleased, committed on `main` (not pushed):** the $12-server bench round (query builder memo, container-aware
+  1x OpenSwoole workers, JWT, configurable errors, TrimStrings, insertReturning, URL-decoded
+  params). See ROADMAP "Unreleased" and `../twelve-bench/`. The skeleton's `main` uses
+  `TrimStrings` and the JWT config, so release the framework (0.8.0) before pushing it.
 - **Next:** not decided (Tier 2 in `docs/ROADMAP.md`). Route caching is a parked idea there
   ("Idea to circle back to").
 - **Example app:** `../expenses` (local git repo only, never give it a remote). Its bench is in
@@ -161,6 +165,12 @@ symlinks this checkout into the app's `vendor/`.
   MySQL's and then can't be dropped ("needed in a foreign key constraint"), so a `down()` that
   drops it fails there. Round-trip migrations (`migrate:fresh` → `migrate:rollback --step=100`
   → `migrate`) on all three databases before trusting a `down()`.
+- **JWT: the algorithm comes from the configured key, never from the token's header.** Keep it
+  that way (`Jwt::verify()`), or `alg: none` / RS-to-HS key confusion become possible.
+- `QueryBuilder::$quoted` is a process-wide memo of quoted identifiers: keep the cap, and only
+  ever put identifiers in it (never values).
+- The twelve bench (`../twelve-bench/`) builds its pype image from this checkout; rebuild
+  (`build.sh`) after framework changes. The Laravel image there is the comparison baseline.
 - Sessions are only written when their data changed or every `session.touch` seconds.
 - Load testing with k6: needs `noCookiesReset` + `redirects: 0` (or browser users silently log
   out), and a 60 s `gracefulStop` (or requests cut off at the end show up as timeouts).

@@ -12,6 +12,9 @@ use Throwable;
  */
 class HttpException extends RuntimeException
 {
+    /** Which of pype's own errors this is (e.g. 'no_route'), so config/app.php 'errors' can reword it. */
+    private ?string $key = null;
+
     /**
      * @param array<string, mixed>  $details  extra fields in the error body
      * @param array<string, string> $headers  extra response headers (e.g. WWW-Authenticate, Retry-After)
@@ -24,6 +27,19 @@ class HttpException extends RuntimeException
         private readonly array $headers = [],
     ) {
         parent::__construct($message, 0, $previous);
+    }
+
+    /** The same exception marked as one of pype's own errors; its message can be set in config('app.errors'). */
+    public function withKey(string $key): static
+    {
+        $this->key = $key;
+
+        return $this;
+    }
+
+    public function key(): ?string
+    {
+        return $this->key;
     }
 
     public function status(): int

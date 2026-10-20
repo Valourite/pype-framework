@@ -146,6 +146,6 @@ final class Invoker
         };
 
         // A route param that doesn't fit its declared type means the route doesn't exist.
-        return $cast ?? throw HttpException::notFound("Invalid value for route parameter {{$name}}");
+        return $cast ?? throw HttpException::notFound("Invalid value for route parameter {{$name}}")->withKey('invalid_param');
     }
 }

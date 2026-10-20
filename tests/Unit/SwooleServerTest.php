@@ -179,4 +179,33 @@ final class SwooleServerTest extends TestCase
         $this->assertSame(10000, $s['max_request'], 'null means keep the default');
         $this->assertFalse($s['enable_coroutine']);
     }
+
+    public function test_cpus_follow_the_container_limit(): void
+    {
+        $dir = sys_get_temp_dir() . '/pype-cgroup-' . bin2hex(random_bytes(4));
+        mkdir("{$dir}/v2", 0777, true);
+        mkdir("{$dir}/v1/cpu", 0777, true);
+        mkdir("{$dir}/none");
+
+        file_put_contents("{$dir}/v2/cpu.max", "200000 100000\n");
+        $this->assertSame(2, SwooleServer::cpus("{$dir}/v2"));
+        file_put_contents("{$dir}/v2/cpu.max", "150000 100000\n");   // --cpus 1.5: round up
+        $this->assertSame(2, SwooleServer::cpus("{$dir}/v2"));
+        file_put_contents("{$dir}/v2/cpu.max", "50000 100000\n");
+        $this->assertSame(1, SwooleServer::cpus("{$dir}/v2"));
+
+        file_put_contents("{$dir}/v1/cpu/cpu.cfs_quota_us", "400000\n");
+        file_put_contents("{$dir}/v1/cpu/cpu.cfs_period_us", "100000\n");
+        $this->assertSame(4, SwooleServer::cpus("{$dir}/v1"));
+
+        // No limit (cpu.max "max", v1 quota -1, or no files): the machine's count.
+        $machine = SwooleServer::cpus("{$dir}/none");
+        $this->assertGreaterThanOrEqual(1, $machine);
+        file_put_contents("{$dir}/v2/cpu.max", "max 100000\n");
+        $this->assertSame($machine, SwooleServer::cpus("{$dir}/v2"));
+        file_put_contents("{$dir}/v1/cpu/cpu.cfs_quota_us", "-1\n");
+        $this->assertSame($machine, SwooleServer::cpus("{$dir}/v1"));
+
+        exec('rm -rf ' . escapeshellarg($dir));
+    }
 }

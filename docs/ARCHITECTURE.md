@@ -136,6 +136,13 @@ after `add()`, by the chained `->name()`). Two routes with the same name are an 
   log lines through `LogReader::forRequest()`. Secrets are hidden: Authorization/Cookie headers,
   cookie values, and input fields named like pass/token/secret/key/card.
 
+**pype's own error wording:** framework throw sites mark their `HttpException` with a stable
+key (`withKey('no_route')`, `bad_json`, `validation`, `unauthenticated`, `invalid_token`, ...;
+listed in the skeleton's `config/app.php`), never in the shared factories, so an app's own
+`notFound('post not found')` is never reworded. `Application::defaultRender()` replaces the
+message with `config('app.errors.<key>')` when set; `server_error` covers the non-debug 500.
+`Validate` takes a `status` (422 default).
+
 ## Mail and work after the response
 
 `Mail\MailProvider` (from `config/mail.php`) binds a `Transport` (PHPMailer for smtp/sendmail/
@@ -249,6 +256,17 @@ copy: all of the user's tokens are deleted. Cookies the guard needs to set trave
 `Session` object (`queueCookie()`), and `StartSession` adds them to the response. Logout and
 password resets revoke them.
 
+JWT (`Auth\Jwt`, `Auth\JwtGuard`; bound by `AuthProvider`, built only when used): HS256 with
+`hash_hmac`/`hash_equals`, RS256 with `openssl_sign`/`openssl_verify`. **The accepted algorithm
+follows from the configured keys, never from the token's header**: a secret allows HS256, a
+public key allows RS256, so `alg: none` and an RS256 public key used as an HMAC secret fail.
+`exp` is required; `nbf` and `exp` allow `leeway`; `iss`/`aud` are checked when configured;
+`kid` picks among several public keys. The guard returns null for non-JWT bearer tokens (no
+dots) so it chains with `TokenGuard`, unless `jwt.only`; a JWT that fails is a 401
+(`invalid_token`). The user is `Auth::findUser(sub)` (`jwt.user = database`), a `JwtUser` from
+the claims (`claims`), or whatever a subclass's `user()` returns; the claims go into the context
+as `JwtClaims`.
+
 `Security\Encrypter` (bound by Application, built on first use): `sodium_crypto_secretbox` with
 APP_KEY, a random nonce per value, JSON (never unserialize), `pype1.` + URL-safe base64;
 `app.previous_keys` decrypt during key rotation.
@@ -267,7 +285,11 @@ Services must be stateless across requests (see the worker-safety principle in `
 
 `Connection` wraps PDO: lazy connect, a prepared-statement cache, `transaction()` (SQLite:
 `BEGIN IMMEDIATE`). `QueryBuilder` (`$db->table('x as a')`) validates identifiers and quotes per
-driver. Migrations are `.php` (schema builder: `Schema` → `Table`/`Column` → `Grammar` per
+driver; quoted identifiers are memoized per process (`QueryBuilder::$quoted`, capped at 1,000
+so identifiers built from user input can't grow a worker's memory). That took building a query
+from ~6 µs to ~1.4 µs (the twelve bench). `insertReturning()` gets database-filled columns
+back: `INSERT ... RETURNING` on SQLite/Postgres, insert + select by `id` on MySQL. Route params
+are URL-decoded after matching (`Application::dispatch()`). Migrations are `.php` (schema builder: `Schema` → `Table`/`Column` → `Grammar` per
 driver) or `.sql`, run in name order, recorded by name and batch in `pype_migrations` (one
 batch per `migrate`). `rollback()` undoes the last batch (or the last N) newest first, via
 `down()` or the part of a `.sql` file after a `-- down` line; one without either is irreversible

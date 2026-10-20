@@ -35,8 +35,9 @@ final class Request
         private readonly string $ip = '127.0.0.1',
         private readonly array $cookies = [],
         private readonly array $files = [],
+        ?Context $context = null,
     ) {
-        $this->context = new Context();
+        $this->context = $context ?? new Context();
     }
 
     /**
@@ -162,6 +163,22 @@ final class Request
     }
 
     /** A copy with another HTTP method. It shares this request's context, params and input. */
+    /**
+     * The same request with other body and/or query input (e.g. TrimStrings). It shares this
+     * request's context and route params, so what earlier stages put there stays.
+     *
+     * @param array<string, mixed>|null $body
+     * @param array<string, mixed>|null $query
+     */
+    public function withInput(?array $body = null, ?array $query = null): self
+    {
+        $clone = new self($this->method, $this->path, $query ?? $this->query, $body ?? $this->body, $this->headers,
+            $this->rawBody, $this->ip, $this->cookies, $this->files, $this->context);
+        $clone->params = $this->params;
+
+        return $clone;
+    }
+
     public function withMethod(string $method): self
     {
         $clone = clone $this;

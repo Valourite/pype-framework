@@ -20,10 +20,10 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype\Outlet`      | `Outlet` (abstract exit stage), `JsonOutlet`, `HtmlOutlet`, `FileOutlet`                 |
 | `Pype\View`        | plain-PHP templates: `ViewOutlet` (class-based views), `View`, layouts and partials      |
 | `Pype\Database`    | PDO `Connection`, `QueryBuilder` (joins, grouping, aggregates), `Migrator` (`.sql` or PHP), `Schema` builder — SQLite (WAL), MySQL, Postgres |
-| `Pype\Auth`        | `Auth` (users, passwords, API tokens), `Authenticate` stage, `Guard`s: `SessionGuard` (with "remember me"), `TokenGuard`, or your own; `PasswordResets`, `RememberTokens`, `EnsureEmailIsVerified` |
+| `Pype\Auth`        | `Auth` (users, passwords, API tokens), `Authenticate` stage, `Guard`s: `SessionGuard` (with "remember me"), `TokenGuard`, `JwtGuard` (HS256/RS256 via `Jwt`), or your own; `PasswordResets`, `RememberTokens`, `EnsureEmailIsVerified` |
 | `Pype\Session`     | `StartSession`, `VerifyCsrfToken`, `FlashValidationErrors` (the `'web'` stack), `RedirectOnSuccess`, `Session`, `SessionStore`: database, file, array or your own. Only saved when changed (or once a minute to slide the expiry) |
 | `Pype\RateLimit`   | `RateLimiter` behind `Throttle`: `DatabaseRateLimiter` (one atomic upsert per hit), `ApcuRateLimiter`, or your own |
-| `Pype\Stages`      | built-in stages: `Cors`, `JsonBody`, `MethodOverride`, `RequestId`, `Throttle`             |
+| `Pype\Stages`      | built-in stages: `Cors`, `JsonBody`, `MethodOverride`, `RequestId`, `Throttle`, `TrimStrings` |
 | `Pype\Validation`  | `Validate` stage, `Validator`, `ValidatedInput`                                           |
 | `Pype\Container`   | PSR-11 container with autowiring                                                          |
 | `Pype\Testing`     | `TestClient` — run requests in-process, no server; keeps cookies like a browser           |

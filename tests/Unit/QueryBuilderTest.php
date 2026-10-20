@@ -153,4 +153,46 @@ final class QueryBuilderTest extends TestCase
 
         $this->assertSame(2, $db->table('plain')->count());
     }
+
+    public function test_identifiers_are_remembered_and_capped(): void
+    {
+        $db = \Pype\Tests\Support\TestDatabase::fresh();
+        $q = fn () => $db->table('posts as p')->join('users as u', 'u.id', '=', 'p.user_id')->select('p.id', 'u.name as author')->where('p.id', 1);
+
+        $first = $q()->toSql();
+        $this->assertSame($first, $q()->toSql());   // second build comes from the memo
+        $this->assertStringContainsString($db->quote('u') . '.' . $db->quote('name') . ' AS ' . $db->quote('author'), $first);
+
+        // Past the cap new identifiers still quote correctly, they just aren't remembered.
+        for ($i = 0; $i < 1100; $i++) {
+            $this->assertStringContainsString($db->quote("c{$i}"), $db->table('t')->select("c{$i}")->toSql());
+        }
+
+        // Invalid ones still throw, every time.
+        foreach ([1, 2] as $_) {
+            try {
+                $db->table('t')->select('a; DROP TABLE t')->toSql();
+                $this->fail('accepted an invalid identifier');
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function test_insert_returning(): void
+    {
+        $db = \Pype\Tests\Support\TestDatabase::fresh();
+        (new \Pype\Database\Schema\Schema($db))->create('notes', function (\Pype\Database\Schema\Table $t) {
+            $t->id();
+            $t->string('body');
+            $t->string('status')->default('new');
+        });
+
+        $row = $db->table('notes')->insertReturning(['body' => 'Hi'], ['id', 'status']);
+        $this->assertSame(['id' => 1, 'status' => 'new'], ['id' => (int) $row['id'], 'status' => $row['status']]);
+
+        $all = $db->table('notes')->insertReturning(['body' => 'Again']);
+        $this->assertSame([2, 'Again', 'new'], [(int) $all['id'], $all['body'], $all['status']]);
+        $this->assertSame(2, $db->table('notes')->count());
+    }
 }

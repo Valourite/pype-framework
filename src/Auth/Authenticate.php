@@ -71,7 +71,7 @@ final class Authenticate implements Stage, ContainerAware
             return Response::redirect($this->redirectTo);
         }
 
-        throw HttpException::unauthorized();
+        throw HttpException::unauthorized()->withKey('unauthenticated');
     }
 
     private function queryString(Request $request): string

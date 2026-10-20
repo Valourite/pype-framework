@@ -20,6 +20,12 @@ anything big.
   `ARCHITECTURE.md` under "Route matching". Also named routes with group prefixes, `url()` /
   `Urls`, signed URLs (`signed_url()`, `ValidateSignature`, `APP_KEY` + `key:generate`), names in
   `bin/pype routes`.
+- **Unreleased** (from the $12-server bench, see BENCHMARKS): query builder memoizes quoted
+  identifiers (~6 → 1.4 µs per query); OpenSwoole defaults to 1 worker per core and reads the
+  container's CPU limit; `Auth\Jwt` + `JwtGuard` (HS256/RS256); configurable wording for pype's
+  own errors (`app.errors`) and `Validate` status; `TrimStrings` stage; `insertReturning()`;
+  `Request::withInput()`. Fixes: route params are URL-decoded; the container uses defaults for
+  optional dependencies it can't build.
 - **0.7.0** (2026-10-20): migration rollback (`down()`, `-- down` in `.sql`, batches,
   `migrate:rollback [--step=N]`, `migrate:fresh`, `Schema::dropAllTables()`); fix: `migrate` (and
   any `insert()` into a table without a sequence) failed on a fresh Postgres database.

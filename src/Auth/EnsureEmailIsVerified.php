@@ -47,6 +47,6 @@ final class EnsureEmailIsVerified implements Stage, ContainerAware
             return Response::redirect($this->redirectTo);
         }
 
-        throw HttpException::forbidden('Your email address is not verified.');
+        throw HttpException::forbidden('Your email address is not verified.')->withKey('unverified_email');
     }
 }

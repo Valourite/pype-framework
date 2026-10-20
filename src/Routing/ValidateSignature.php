@@ -34,7 +34,7 @@ final class ValidateSignature implements Stage, ContainerAware
     public function handle(Request $request, Closure $next): mixed
     {
         if (!($this->urls ?? Urls::current())->hasValidSignature($request)) {
-            throw HttpException::forbidden($this->message);
+            throw HttpException::forbidden($this->message)->withKey('invalid_signature');
         }
 
         return $next($request);

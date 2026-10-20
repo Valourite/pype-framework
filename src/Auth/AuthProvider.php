@@ -22,6 +22,10 @@ final class AuthProvider implements Provider
             $app->config('auth', []),
         ));
 
+        // Built only if a JwtGuard is listed in auth.guards (or something asks for Jwt).
+        $app->container->singleton(Jwt::class, fn () => new Jwt((array) $app->config('auth.jwt', [])));
+        $app->container->singleton(JwtGuard::class, fn ($c) => new JwtGuard($c->get(Jwt::class), fn () => $c->get(Auth::class)));
+
         $app->stack('auth', [new Authenticate()]);
     }
 }

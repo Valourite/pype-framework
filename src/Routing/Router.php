@@ -270,10 +270,10 @@ final class Router
         }
 
         if ($allowed !== []) {
-            throw HttpException::methodNotAllowed(array_values(array_unique($allowed)));
+            throw HttpException::methodNotAllowed(array_values(array_unique($allowed)))->withKey('method_not_allowed');
         }
 
-        throw HttpException::notFound("No route for {$method} {$path}");
+        throw HttpException::notFound("No route for {$method} {$path}")->withKey('no_route');
     }
 
     /**

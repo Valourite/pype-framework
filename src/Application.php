@@ -279,7 +279,8 @@ final class Application
     {
         [$route, $params] = $this->router->resolve($request->method(), $request->path());
 
-        $request->setParams($params);
+        // Matched on the raw path (so an encoded "/" stays inside its segment), then decoded.
+        $request->setParams(array_map('rawurldecode', $params));
         $request->context()->put($route);   // for the request log and the error page
 
         return $this->pipeline()
@@ -357,10 +358,18 @@ final class Application
         return null;
     }
 
+    /** pype's own error messages, reworded by config/app.php 'errors' => ['no_route' => 'not found', ...]. */
+    private function errorMessage(?string $key, string $default): string
+    {
+        $message = $key === null ? null : $this->config("app.errors.{$key}");
+
+        return is_string($message) ? $message : $default;
+    }
+
     private function defaultRender(Throwable $e): Response
     {
         if ($e instanceof HttpException) {
-            $response = Response::error($e->status(), $e->getMessage(), $e->details());
+            $response = Response::error($e->status(), $this->errorMessage($e->key(), $e->getMessage()), $e->details());
 
             foreach ($e->headers() as $name => $value) {
                 $response = $response->withHeader($name, $value);
@@ -370,7 +379,7 @@ final class Application
         }
 
         if (!$this->config('app.debug')) {
-            return Response::error(500, 'Server Error');
+            return Response::error(500, $this->errorMessage('server_error', 'Server Error'));
         }
 
         return Response::error(500, $e->getMessage(), [

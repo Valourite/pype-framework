@@ -129,4 +129,13 @@ final class RouterTest extends TestCase
 
         unlink($file);
     }
+
+    public function test_route_params_are_url_decoded(): void
+    {
+        $app = new \Pype\Application(__DIR__);
+        $app->router->get('/tags/{tag}/{rest}', fn (string $tag, string $rest) => [$tag, $rest]);
+
+        $res = (new \Pype\Testing\TestClient($app))->get('/tags/caf%C3%A9/a%2Fb');
+        $this->assertSame(['café', 'a/b'], $res->json('data'));
+    }
 }

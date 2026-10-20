@@ -117,7 +117,13 @@ final class Container implements ContainerInterface
             $type = $param->getType();
 
             if ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
-                $args[] = $this->make($type->getName());
+                try {
+                    $args[] = $this->make($type->getName());
+                } catch (ContainerException|NotFoundException $e) {
+                    // An optional dependency nothing provides (?Closure $x = null, an unbound
+                    // interface with a default): use the default instead of failing.
+                    $args[] = $param->isDefaultValueAvailable() ? $param->getDefaultValue() : throw $e;
+                }
             } elseif ($param->isDefaultValueAvailable()) {
                 $args[] = $param->getDefaultValue();
             } else {

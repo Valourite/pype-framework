@@ -35,14 +35,14 @@ final class JsonBody implements Stage
         // post_max_size / upload_max_filesize.
         if (!$isJson) {
             if ($this->requireJson && $raw !== '') {
-                throw new HttpException(415, 'Unsupported Media Type: send application/json');
+                throw (new HttpException(415, 'Unsupported Media Type: send application/json'))->withKey('unsupported_media_type');
             }
 
             return $next($request);
         }
 
         if (max(strlen($raw), (int) $request->header('content-length', '0')) > $this->maxBytes) {
-            throw new HttpException(413, 'Payload Too Large', ['max_bytes' => $this->maxBytes]);
+            throw (new HttpException(413, 'Payload Too Large', ['max_bytes' => $this->maxBytes]))->withKey('payload_too_large');
         }
 
         if ($raw === '') {
@@ -52,7 +52,7 @@ final class JsonBody implements Stage
         json_decode($raw, flags: 0, depth: $this->maxDepth);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new HttpException(400, 'Malformed JSON body', ['reason' => json_last_error_msg()]);
+            throw (new HttpException(400, 'Malformed JSON body', ['reason' => json_last_error_msg()]))->withKey('bad_json');
         }
 
         return $next($request);

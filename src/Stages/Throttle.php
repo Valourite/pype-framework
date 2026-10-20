@@ -47,7 +47,7 @@ final class Throttle implements Stage, ContainerAware
         [$hits, $resetAt] = $limiter->hit($key, $this->decaySeconds);
 
         if ($hits > $this->maxAttempts) {
-            throw HttpException::tooManyRequests(max(1, $resetAt - time()));
+            throw HttpException::tooManyRequests(max(1, $resetAt - time()))->withKey('throttled');
         }
         /** @var Response $response */
         $response = $next($request);

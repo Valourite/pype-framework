@@ -36,7 +36,7 @@ final class VerifyCsrfToken implements Stage
         $token = $request->input('_token') ?? $request->header('x-csrf-token');
 
         if (!is_string($token) || !hash_equals($session->token(), $token)) {
-            throw new HttpException(419, 'Page expired. Please refresh and try again.');
+            throw (new HttpException(419, 'Page expired. Please refresh and try again.'))->withKey('csrf');
         }
 
         return $next($request);

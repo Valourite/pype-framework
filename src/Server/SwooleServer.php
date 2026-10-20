@@ -71,8 +71,10 @@ final class SwooleServer
     public function settings(): array
     {
         return [
-            // Twice the cores: a worker busy hashing a password (bcrypt) shouldn't leave a core idle.
-            'worker_num' => 2 * self::cpus(),
+            // One per core: each worker runs one request at a time and PHP is CPU-bound, so more
+            // workers than cores only adds switching (the twelve bench: 1x beat 2x on CPU and p95).
+            // Set SWOOLE_WORKERS higher when requests wait on a network database or bcrypt.
+            'worker_num' => self::cpus(),
             'max_request' => 10000,            // recycle workers now and then, capping any slow leak
             'enable_coroutine' => false,       // one request at a time per worker, like PHP-FPM
             'package_max_length' => 8 * 1024 * 1024,
@@ -83,9 +85,14 @@ final class SwooleServer
         ];
     }
 
-    /** CPU cores the machine reports. Containers with a CPU limit still report all host cores: set workers yourself there. */
-    private static function cpus(): int
+    /** CPU cores this process may use: the container's limit if there is one, else the machine's. */
+    public static function cpus(string $cgroup = '/sys/fs/cgroup'): int
     {
+        // A container limited with --cpus 2 still reports every host core to getCPUNum().
+        if (($limit = self::cgroupLimit($cgroup)) !== null) {
+            return $limit;
+        }
+
         $n = match (true) {
             method_exists(\OpenSwoole\Util::class, 'getCPUNum') => \OpenSwoole\Util::getCPUNum(),
             function_exists('swoole_cpu_num') => swoole_cpu_num(),
@@ -93,6 +100,27 @@ final class SwooleServer
         };
 
         return max(1, (int) $n);
+    }
+
+    /** cgroup v2 (cpu.max: "200000 100000") or v1 (cpu.cfs_quota_us / cpu.cfs_period_us); null = no limit. */
+    private static function cgroupLimit(string $cgroup): ?int
+    {
+        $v2 = @file_get_contents("{$cgroup}/cpu.max");
+
+        if (is_string($v2)) {
+            [$quota, $period] = array_pad(explode(' ', trim($v2)), 2, '100000');
+
+            return $quota === 'max' || (int) $period <= 0 ? null : max(1, (int) ceil((int) $quota / (int) $period));
+        }
+
+        $quota = @file_get_contents("{$cgroup}/cpu/cpu.cfs_quota_us");
+        $period = @file_get_contents("{$cgroup}/cpu/cpu.cfs_period_us");
+
+        if (!is_string($quota) || !is_string($period) || (int) $quota <= 0 || (int) $period <= 0) {
+            return null;
+        }
+
+        return max(1, (int) ceil((int) $quota / (int) $period));
     }
 
     public function handle(object $req, object $res): void

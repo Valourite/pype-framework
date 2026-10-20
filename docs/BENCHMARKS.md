@@ -113,3 +113,22 @@ disk). Two runs; numbers agreed within ~3% except SQLite (±25%).
   because each autocommit INSERT waits for a log flush (`innodb_flush_log_at_trx_commit=1`).
 - Real jobs (mail, HTTP calls) take milliseconds, so the queue's overhead rarely matters;
   add workers for slow jobs. Not measured: the desktop host's disk dominates commit times.
+
+### The $12-server challenge: pype vs Laravel (2026-10-20, `../twelve-bench/`)
+
+The challenge's 5-endpoint feed API on SQLite, built idiomatically with pype (OpenSwoole) and
+Laravel 13.37 (Octane on Swoole), nginx in front, 2 vCPU / 4 GB. Full method, caveats and
+numbers in `../twelve-bench/README.md`.
+
+| | pype 0.7.0 | Laravel 13.37 |
+|---|---|---|
+| max req/s (challenge mix) | 23,000 | 2,700 |
+| challenge users (`load.js`) | 40,000 pass at 31% CPU (generator limit) | ~24,000 |
+| PHP CPU per request | ~52 µs | ~0.7 ms (incl. nginx) |
+
+Profile of pype at 15k req/s (per request): nginx ~14 µs, a bare OpenSwoole server ~14 µs,
+SQLite ~15 µs, the framework the rest. The biggest framework cost was building SQL in the query
+builder (~6 µs per query, mostly identifier regex + quoting); memoizing quoted identifiers took it
+to ~1.4 µs. End to end that's ~3% less PHP CPU per request (alternating runs), within the host's
+noise; the max rate stayed ~23–24k req/s.
+
