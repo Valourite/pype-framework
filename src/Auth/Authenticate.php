@@ -10,7 +10,9 @@ use Pype\Container\ContainerAware;
 use Pype\Exceptions\HttpException;
 use Pype\Http\Request;
 use Pype\Http\Response;
+use Pype\Pipeline\Provides;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
 use Pype\Session\Session;
 
 /**
@@ -23,8 +25,11 @@ use Pype\Session\Session;
  *   ['web', new Authenticate(redirectTo: '/login'), ...]        // browsers go to the login page
  *   [new Authenticate(optional: true), Feed::class]             // guests allowed; user injected if present
  */
+#[Provides(Auth::USER)]
 final class Authenticate implements Stage, ContainerAware
 {
+    use WithArguments;
+
     private ?ContainerInterface $container = null;
 
     /**

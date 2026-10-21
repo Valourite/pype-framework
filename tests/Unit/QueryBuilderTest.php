@@ -108,7 +108,8 @@ final class QueryBuilderTest extends TestCase
         $this->assertFalse($page->hasNext());
 
         $this->assertSame(1, $this->db->table('expenses')->paginate(3, -5)->page);
-        $this->assertSame([], $this->db->table('expenses')->paginate(3, 9)->items);
+        $this->assertSame(2, $this->db->table('expenses')->paginate(3, 9)->page);   // past the end: the last page
+        $this->assertCount(1, $this->db->table('expenses')->paginate(3, 9)->items);
         $this->assertSame(1, $this->db->table('expenses')->where('amount', 0)->paginate()->lastPage());
 
         // Grouped queries count their groups.

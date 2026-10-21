@@ -6,6 +6,7 @@ namespace Pype\Database;
 
 use InvalidArgumentException;
 use LogicException;
+use Pype\Http\Request;
 
 /**
  * Small fluent query builder. Every value is bound; identifiers are validated and quoted.
@@ -258,18 +259,56 @@ final class QueryBuilder
     }
 
     /**
-     * One page of results plus the total count. $page is clamped to at least 1; past the
-     * last page you get an empty page (and the real total, so the UI can link back).
+     * One page of results plus the total count.
+     *
+     *   $db->table('quotes')->where('company_id', $id)->latest()->paginate(25, $request)
+     *
+     * Given the Request, the page number comes from ?page= and the page's links keep the other
+     * query parameters. Given an int, links are '?page=N' only. The page is clamped to 1..last:
+     * past the end (?page=99999) you get the last page.
+     *
+     * $count replaces the default COUNT(*) over this whole query (joins and all): a cheaper
+     * query that counts the same rows, or a number you already have (cached, say).
      */
-    public function paginate(int $perPage = 15, int $page = 1): Page
+    public function paginate(int $perPage = 15, int|Request $page = 1, self|int|null $count = null, string $pageName = 'page'): Page
     {
         $perPage = max(1, $perPage);
-        $page = max(1, $page);
-        $total = (clone $this)->count();
+        [$number, $urls] = self::pageAndUrls($page, $pageName);
 
-        $items = $total === 0 ? [] : (clone $this)->limit($perPage)->offset(($page - 1) * $perPage)->get();
+        $total = match (true) {
+            is_int($count) => max(0, $count),
+            $count instanceof self => $count->count(),
+            default => (clone $this)->count(),
+        };
 
-        return new Page($items, $total, $perPage, $page);
+        // Past the end (?page=99999, or rows deleted since the link was made): show the last page.
+        $number = min($number, max(1, (int) ceil($total / $perPage)));
+        $items = $total === 0 ? [] : (clone $this)->limit($perPage)->offset(($number - 1) * $perPage)->get();
+
+        return new Page($items, $total, $perPage, $number, $urls);
+    }
+
+    /**
+     * A page without a total: fetches $perPage + 1 rows to know whether there is a next page,
+     * and runs no COUNT(*). Previous/next links only. A page past the end is simply empty.
+     */
+    public function simplePaginate(int $perPage = 15, int|Request $page = 1, string $pageName = 'page'): SimplePage
+    {
+        $perPage = max(1, $perPage);
+        [$number, $urls] = self::pageAndUrls($page, $pageName);
+
+        $rows = (clone $this)->limit($perPage + 1)->offset(($number - 1) * $perPage)->get();
+        $hasMore = count($rows) > $perPage;
+
+        return new SimplePage($hasMore ? array_slice($rows, 0, $perPage) : $rows, $perPage, $number, $hasMore, $urls);
+    }
+
+    /** @return array{0: int, 1: PageUrls|null} */
+    private static function pageAndUrls(int|Request $page, string $pageName): array
+    {
+        return $page instanceof Request
+            ? [PageUrls::pageFrom($page, $pageName), PageUrls::from($page, $pageName)]
+            : [max(1, $page), null];
     }
 
     public function value(string $column): mixed

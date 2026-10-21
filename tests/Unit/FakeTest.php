@@ -55,6 +55,18 @@ final class FakeTest extends TestCase
         $this->assertSame(count($emails), count(array_unique($emails)));
     }
 
+    public function test_unique_strings_get_numbered_when_the_list_runs_out(): void
+    {
+        $fake = new Fake(7);
+        $words = [];
+        for ($i = 0; $i < 1500; $i++) {
+            $words[] = $fake->unique()->word();   // ~500 words in the list
+        }
+
+        $this->assertCount(1500, array_unique($words));
+        $this->assertMatchesRegularExpression('/^[a-z]+\d+$/', $words[1499]);
+    }
+
     public function test_unique_never_repeats_and_says_when_it_runs_out(): void
     {
         $fake = new Fake();

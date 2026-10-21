@@ -11,12 +11,21 @@ use Throwable;
 /**
  * $this inside a template file.
  *
- * Forms (need the 'web' stack, i.e. a session):
+ * Every template rendered for a request (pages, their layouts and partials) also gets these
+ * variables, so forms need no $this->:
+ *   $csrf             the CSRF token (needs the 'web' stack; using it without one throws)
+ *   $old('email')     what was typed before a failed submission ('' if nothing); 'lines.3.qty' reads nested input
+ *   $error('email')   the first validation error for that field, or null
+ *   $errors           every error: ['email' => ['...'], ...]
+ * Your own data wins when it uses the same name.
+ *
  *   <form method="post">
- *       <?= $this->csrf() ?>
- *       <input name="email" value="<?= e($this->old('email')) ?>">
- *       <?php if ($error = $this->error('email')): ?><p><?= e($error) ?></p><?php endif ?>
+ *       <input type="hidden" name="_token" value="<?= e($csrf) ?>">
+ *       <input name="email" value="<?= e($old('email')) ?>">
+ *       <?php if ($message = $error('email')): ?><p><?= e($message) ?></p><?php endif ?>
  *   </form>
+ *
+ * Don't assign to $error or $old in a template ($error = ...): that replaces the helper.
  *
  *   <form method="post" action="/posts/5"><?= $this->csrf() ?><?= $this->method('DELETE') ?> ...</form>
  */
@@ -47,7 +56,7 @@ final class Template
             (function (string $__file, array $__data): void {
                 extract($__data, EXTR_SKIP);
                 require $__file;
-            })($file, $data);
+            })($file, $this->request === null ? $data : [...$this->locals(), ...$data]);
 
             $content = (string) ob_get_clean();
         } catch (Throwable $e) {
@@ -104,10 +113,26 @@ final class Template
         return $session->token();
     }
 
-    /** Input from the previous, failed submission (see FlashValidationErrors). */
+    /**
+     * Input from the previous, failed submission (see FlashValidationErrors). Dots reach into
+     * arrays: old('lines.3.quantity') is what was sent as lines[3][quantity].
+     */
     public function old(string $key, mixed $default = ''): mixed
     {
-        return $this->session()?->get('_old')[$key] ?? $default;
+        $value = $this->session()?->get('_old') ?? [];
+
+        if (array_key_exists($key, $value)) {
+            return $value[$key] ?? $default;
+        }
+
+        foreach (explode('.', $key) as $segment) {
+            if (!is_array($value) || !array_key_exists($segment, $value)) {
+                return $default;
+            }
+            $value = $value[$segment];
+        }
+
+        return $value ?? $default;
     }
 
     /** First validation error for a field, or null. */
@@ -120,5 +145,34 @@ final class Template
     public function errors(): array
     {
         return $this->session()?->get('_errors') ?? [];
+    }
+
+    /** For engines other than plain PHP: the request whose session the helpers below read. */
+    public function forRequest(Request $request): self
+    {
+        $this->request = $request;
+
+        return $this;
+    }
+
+    /**
+     * $csrf, $old, $error and $errors for the request being rendered (Views gives them to Latte
+     * and Blade templates too).
+     *
+     * @return array{csrf: string|\Stringable, old: \Closure, error: \Closure, errors: array<string, list<string>>}
+     */
+    public function locals(): array
+    {
+        return [
+            'csrf' => $this->session()?->token() ?? new class () implements \Stringable {
+                public function __toString(): string
+                {
+                    throw new \LogicException('$csrf needs a session. Add the \'web\' stack to this route.');
+                }
+            },
+            'old' => $this->old(...),
+            'error' => $this->error(...),
+            'errors' => $this->errors(),
+        ];
     }
 }

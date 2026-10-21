@@ -7,6 +7,7 @@ namespace Pype\Pipeline;
 use Closure;
 use InvalidArgumentException;
 use Psr\Container\ContainerInterface;
+use Pype\Container\Container;
 use Pype\Container\ContainerAware;
 use Throwable;
 
@@ -15,6 +16,7 @@ use Throwable;
  *
  * A stage may be:
  *  - a class-string (resolved through the container) of a Stage or an invokable class
+ *  - a StageSpec (stage(X::class, arg: ...)): built when reached, arguments given, services autowired
  *  - a configured instance: new Throttle(60)
  *  - a Closure
  *
@@ -110,7 +112,11 @@ final class Pipeline
 
     private function invoke(mixed $stage, mixed $passable, Closure $next): mixed
     {
-        if (is_string($stage)) {
+        if ($stage instanceof StageSpec) {
+            $stage = $this->container instanceof Container
+                ? $this->container->makeWith($stage->class, $stage->args)
+                : throw new \LogicException('stage() needs pype\'s container to build ' . $stage->class . '.');
+        } elseif (is_string($stage)) {
             $stage = $this->container->get($stage);
         }
 

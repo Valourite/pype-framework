@@ -15,6 +15,7 @@ use Pype\Pipeline\Invoker;
 use Pype\Queue\FailedJobs;
 use Pype\Queue\Queue;
 use Pype\Queue\Worker;
+use Pype\Routing\RouteCheck;
 use Pype\Routing\Router;
 use Pype\Schedule\Schedule;
 use Pype\Server\SwooleServer;
@@ -24,8 +25,6 @@ use Pype\Server\SwooleServer;
  */
 final class Console
 {
-    private const SCHEDULE = 'routes/schedule.php';
-
     /** @var array<string, array{0: string, 1: Closure(list<string>): int}> */
     private array $commands;
 
@@ -34,25 +33,29 @@ final class Console
         $this->commands = [
             'serve' => ['Start the server [--port=8000] [--host=localhost] [--server=fpm|swoole] [--workers=N]', $this->serve(...)],
             'routes' => ['List routes and their compiled pipelines', $this->routes(...)],
+            'routes:check' => ['Check every route\'s stage order: what a stage #[Requires] must be #[Provides]d before it', $this->routesCheck(...)],
             'make:stage' => ['Create app/Stages/<Name>.php', fn (array $a) => $this->make('Stages', $a[0] ?? null, 'stage')],
             'make:outlet' => ['Create app/Outlets/<Name>.php', fn (array $a) => $this->make('Outlets', $a[0] ?? null, 'outlet')],
+            'make:view' => ['Create app/Views/<Name>.php (a page: reads the context) and its template', $this->makeView(...)],
             'make:provider' => ['Create app/Providers/<Name>.php', fn (array $a) => $this->make('Providers', $a[0] ?? null, 'provider')],
             'make:factory' => ['Create database/factories/<Name>Factory.php', fn (array $a) => $this->makeIn('database/factories', 'Database\\Factories', isset($a[0]) ? preg_replace('/Factory$/', '', $a[0]) . 'Factory' : null, 'factory')],
             'make:seeder' => ['Create database/seeders/<Name>.php', fn (array $a) => $this->makeIn('database/seeders', 'Database\\Seeders', $a[0] ?? null, 'seeder')],
             'make:job' => ['Create app/Jobs/<Name>.php (push it with Pype\\Queue\\Queue)', fn (array $a) => $this->make('Jobs', $a[0] ?? null, 'job')],
             'make:command' => ['Create app/Commands/<Name>.php (register it in a provider)', fn (array $a) => $this->make('Commands', $a[0] ?? null, 'command')],
+            'make:routes' => ['Create routes/<name>/web.php and api.php, loaded by $app->routesIn() [--web or --api: only that one]', $this->makeRoutes(...)],
             'make:migration' => ['Create database/migrations/<timestamp>_<name>.php [--sql for plain SQL]', $this->makeMigration(...)],
             'migrate' => ['Run pending migrations', $this->migrate(...)],
             'migrate:rollback' => ['Undo the last batch of migrations [--step=N: the last N instead]', $this->migrateRollback(...)],
             'migrate:fresh' => ['Drop every table and run all migrations (development) [--seed] [--force when APP_DEBUG is off]', $this->migrateFresh(...)],
             'db:seed' => ['Run database/seeders/DatabaseSeeder [--class=Name] [--force when APP_DEBUG is off] [seeder options]', $this->dbSeed(...)],
             'migrate:status' => ['Show which migrations have run', $this->migrateStatus(...)],
+            'install' => ['Choose optional packages for a new app: template engine, Faker [--template=php|latte|blade|both] [--faker|--no-faker] [--no-interaction] [--dry-run]', $this->install(...)],
             'key:generate' => ['Set APP_KEY in .env (for signed URLs) [--show] [--force]', $this->keyGenerate(...)],
             'optimize' => ['Compile the route tables to ' . Application::ROUTE_CACHE . ' (run on deploy)', $this->optimize(...)],
             'optimize:clear' => ['Remove the compiled route tables', $this->optimizeClear(...)],
             'cache:clear' => ['Remove everything in the cache (keys with the cache prefix)', $this->cacheClear(...)],
             'schedule:run' => ['Run the scheduled tasks that are due (call from cron every minute) [--time="Y-m-d H:i"]', $this->scheduleRun(...)],
-            'schedule:list' => ['List the scheduled tasks in ' . self::SCHEDULE, $this->scheduleList(...)],
+            'schedule:list' => ['List the scheduled tasks in ' . Application::SCHEDULE, $this->scheduleList(...)],
             'schedule:work' => ['Run schedule:run every minute, without cron (Ctrl+C to stop)', $this->scheduleWork(...)],
             'queue:work' => ['Process queued jobs [--queue=default,mail] [--once] [--stop-when-empty] [--max-jobs=N] [--max-time=S] [--memory=128] [--sleep=1] [--timeout=60]', $this->queueWork(...)],
             'queue:restart' => ['Tell running queue workers to stop after their current job (run on deploy)', $this->queueRestart(...)],
@@ -117,13 +120,11 @@ final class Console
     {
         $opts = $this->options($args);
 
+        $this->mailNotice(($opts['host'] ?? 'localhost') . ':' . ($opts['port'] ?? '8000'));
+
         // APP_SERVER=swoole: a long-running OpenSwoole server (the app boots once).
         if (($opts['server'] ?? $this->app->config('app.server', 'fpm')) === 'swoole') {
-            $workers = $opts['workers'] ?? $this->app->config('app.swoole.workers');
-            (new SwooleServer($this->app, $opts['host'] ?? '0.0.0.0', (int) ($opts['port'] ?? 8000), [
-                'worker_num' => $workers === null || $workers === '' ? null : (int) $workers,
-                'max_request' => $this->app->config('app.swoole.max_request'),
-            ]))->start();
+            SwooleServer::fromApp($this->app, $opts)->start();
 
             return 0;
         }
@@ -135,6 +136,139 @@ final class Console
         passthru(sprintf('%s -S %s -t %s', escapeshellarg(PHP_BINARY), escapeshellarg($address), escapeshellarg($this->app->basePath . '/public')), $code);
 
         return $code;
+    }
+
+    /** One line at start-up when mail isn't really delivered, and where to read it. */
+    private function mailNotice(string $address): void
+    {
+        $mailbox = $this->app->router->named('pype.mail');
+        $where = $mailbox === null ? 'in the log (/_pype/logs)' : "at http://{$address}{$mailbox->path()}";
+
+        if ($this->app->config('mail.driver', 'log') === 'log') {
+            echo "Mail: MAIL_DRIVER=log, so nothing is delivered. Read what was sent {$where}.\n";
+        } elseif ($mailbox !== null) {
+            echo "Mail: copies of what is sent are at http://{$address}{$mailbox->path()}\n";
+        }
+    }
+
+    /** Packages install can add: [composer require arguments, what it's for]. */
+    private const INSTALLABLE = [
+        'latte' => [['latte/latte'], 'Latte templates: write resources/views/<name>.latte'],
+        'blade' => [['eftec/bladeone'], 'Blade templates (BladeOne): write resources/views/<name>.blade.php'],
+        'faker' => [['--dev', 'fakerphp/faker'], 'Faker for factories and seeders: $faker = Faker\\Factory::create(); (the built-in Fake stays available)'],
+    ];
+
+    /**
+     * Run by composer create-project (post-create-project-cmd) after the app is in place: asks which
+     * optional packages to add and runs composer require for them. Answers come from the options
+     * first; without a terminal (CI, --no-interaction) anything not given is "no".
+     */
+    private function install(array $args): int
+    {
+        $opts = $this->options($args);
+        $interactive = !in_array('--no-interaction', $args, true) && !in_array('-n', $args, true)
+            && !filter_var(getenv('COMPOSER_NO_INTERACTION'), FILTER_VALIDATE_BOOLEAN)
+            && function_exists('stream_isatty') && @stream_isatty(STDIN);
+
+        $template = $opts['template'] ?? ($interactive ? $this->choose('Templates', [
+            'php' => 'plain PHP (no package)',
+            'latte' => 'Latte',
+            'blade' => 'Blade (BladeOne)',
+            'both' => 'Latte and Blade',
+        ], 'php') : 'php');
+
+        if (!in_array($template, ['php', 'latte', 'blade', 'both'], true)) {
+            fwrite(STDERR, "Unknown --template={$template}: use php, latte, blade or both.\n");
+
+            return 1;
+        }
+
+        $faker = match (true) {
+            in_array('--faker', $args, true) => true,
+            in_array('--no-faker', $args, true) => false,
+            default => $interactive && $this->confirm('Add Faker for fake data in factories and seeders?', false),
+        };
+
+        $chosen = [...match ($template) { 'latte' => ['latte'], 'blade' => ['blade'], 'both' => ['latte', 'blade'], default => [] }, ...($faker ? ['faker'] : [])];
+
+        if ($chosen === []) {
+            echo "Nothing extra to install: plain PHP templates and the built-in Fake. Run php bin/pype install again any time.\n";
+
+            return 0;
+        }
+
+        $composer = getenv('COMPOSER_BINARY') ?: 'composer';
+        $runtime = array_merge(...array_map(fn (string $k) => self::INSTALLABLE[$k][0], array_values(array_filter($chosen, fn ($k) => $k !== 'faker'))));
+        $commands = array_values(array_filter([
+            $runtime === [] ? null : [$composer, 'require', ...$runtime],
+            $faker ? [$composer, 'require', ...self::INSTALLABLE['faker'][0]] : null,
+        ]));
+
+        foreach ($commands as $command) {
+            $line = implode(' ', array_map('escapeshellarg', $command));
+            // composer passes its own path as COMPOSER_BINARY (a .phar or a script): run it with this PHP.
+            $line = str_ends_with((string) $command[0], '.phar') ? escapeshellarg(PHP_BINARY) . ' ' . $line : $line;
+
+            if (in_array('--dry-run', $args, true)) {
+                echo "Would run: {$line}\n";
+                continue;
+            }
+
+            echo "Running: {$line}\n";
+            passthru($line, $code);
+
+            if ($code !== 0) {
+                fwrite(STDERR, "That failed (exit {$code}). Run it yourself, or php bin/pype install again.\n");
+
+                return $code;
+            }
+        }
+
+        foreach ($chosen as $key) {
+            echo (in_array('--dry-run', $args, true) ? '  would add: ' : '  ✓ ') . self::INSTALLABLE[$key][1] . "\n";
+        }
+
+        return 0;
+    }
+
+    /** @param array<string, string> $options value => label; the default is chosen on Enter */
+    private function choose(string $question, array $options, string $default): string
+    {
+        $keys = array_keys($options);
+        echo "{$question}:\n";
+        foreach ($keys as $i => $key) {
+            printf("  [%d] %s%s\n", $i + 1, $options[$key], $key === $default ? ' (default)' : '');
+        }
+        echo '> ';
+        $answer = trim((string) fgets(STDIN));
+
+        return $keys[(int) $answer - 1] ?? (in_array($answer, $keys, true) ? $answer : $default);
+    }
+
+    private function confirm(string $question, bool $default): bool
+    {
+        echo $question . ($default ? ' [Y/n] ' : ' [y/N] ');
+        $answer = strtolower(trim((string) fgets(STDIN)));
+
+        return $answer === '' ? $default : in_array($answer, ['y', 'yes'], true);
+    }
+
+    private function routesCheck(): int
+    {
+        $check = new RouteCheck($this->app);
+        $problems = $check->problems();
+
+        foreach ($problems as $problem) {
+            fwrite(STDERR, "✗ {$problem}\n");
+        }
+
+        foreach ($check->hints() as $hint) {
+            echo "  hint: {$hint}\n";
+        }
+
+        printf("%s %d routes checked, %d problem%s.\n", $problems === [] ? '✓' : '✗', count($this->app->router->routes()), count($problems), count($problems) === 1 ? '' : 's');
+
+        return $problems === [] ? 0 : 1;
     }
 
     private function routes(): int
@@ -338,7 +472,7 @@ final class Console
     private function schedule(): Schedule
     {
         $schedule = new Schedule();
-        $file = $this->app->path((string) $this->app->config('app.schedule', self::SCHEDULE));
+        $file = $this->app->path((string) $this->app->config('app.schedule', Application::SCHEDULE));
 
         if (is_file($file)) {
             (static function (Schedule $schedule, Application $app, string $__file): void {
@@ -376,7 +510,7 @@ final class Console
         $tasks = $this->schedule()->tasks();
 
         if ($tasks === []) {
-            echo 'No tasks in ' . self::SCHEDULE . ".\n";
+            echo 'No tasks in ' . Application::SCHEDULE . ".\n";
         }
 
         foreach ($tasks as $task) {
@@ -540,6 +674,62 @@ final class Console
         return 0;
     }
 
+    private function makeRoutes(array $args): int
+    {
+        $name = array_values(array_filter($args, static fn (string $a) => !str_starts_with($a, '--')))[0] ?? '';
+
+        if (!preg_match('/^[a-z][a-z0-9-]*$/', $name)) {
+            fwrite(STDERR, "Give a lowercase name, e.g. make:routes quotes\n");
+
+            return 1;
+        }
+
+        $only = array_intersect(['--web', '--api'], $args);
+        $kinds = $only === [] ? ['web', 'api'] : array_map(static fn (string $a) => substr($a, 2), $only);
+        $code = 0;
+
+        foreach ($kinds as $kind) {
+            $relative = "routes/{$name}/{$kind}.php";
+            $path = $this->app->path($relative);
+
+            if (file_exists($path)) {
+                fwrite(STDERR, "Already exists: {$relative}\n");
+                $code = 1;
+                continue;
+            }
+
+            @mkdir(dirname($path), 0777, true);
+            file_put_contents($path, $this->routesStub($name, $kind));
+            echo "Created {$relative}\n";
+        }
+
+        return $code;
+    }
+
+    private function routesStub(string $name, string $kind): string
+    {
+        [$about, $stack, $example] = $kind === 'web'
+            ? ["Pages for {$name}. 'web' gives sessions, CSRF and validation errors back to the form.", "'web'", "// \$router->get('/', [LoadThings::class, ThingsView::class])->name('index');   // url('{$name}.index')"]
+            : ["JSON for {$name}, served under /api/{$name} (api.php files get the /api prefix and api. names). 'auth' takes a bearer token.", "'auth'", "// \$router->get('/{id}', [LoadThing::class])->name('show');   // url('api.{$name}.show')"];
+
+        return <<<PHP
+            <?php
+
+            declare(strict_types=1);
+
+            use Pype\Routing\Router;
+
+            /** @var Router \$router */
+
+            // {$about}
+            // Loaded by \$app->routesIn() in bootstrap/app.php; nothing to register.
+            \$router->group('/{$name}', [{$stack}], function (Router \$router) {
+                {$example}
+            }, name: '{$name}.');
+
+            PHP;
+    }
+
     private function makeMigration(array $args): int
     {
         $sql = in_array('--sql', $args, true);
@@ -656,6 +846,34 @@ final class Console
         return 0;
     }
 
+    /** A page outlet plus its template: QuoteView → app/Views/QuoteView.php and resources/views/quote.php. */
+    private function makeView(array $args): int
+    {
+        $name = $args[0] ?? null;
+        $code = $this->make('Views', $name, 'view');
+
+        if ($code !== 0) {
+            return $code;
+        }
+
+        $relative = $this->app->config('app.views', 'resources/views') . '/' . $this->viewTemplate((string) $name) . '.php';
+        $path = $this->app->path($relative);
+
+        if (!file_exists($path)) {
+            @mkdir(dirname($path), 0777, true);
+            file_put_contents($path, "<?php\n/** Variables come from {$name}::data(); \$csrf, \$old(), \$error() are always there. */\n?>\n<h1>{$name}</h1>\n");
+            echo "Created {$relative}\n";
+        }
+
+        return 0;
+    }
+
+    /** QuoteView → 'quote', InvoiceListView → 'invoice-list'. */
+    private function viewTemplate(string $class): string
+    {
+        return $this->kebab((string) preg_replace('/View$/', '', $class) ?: $class);
+    }
+
     private function stub(string $kind, string $namespace, string $class): string
     {
         $body = match ($kind) {
@@ -664,11 +882,46 @@ final class Console
                 use Pype\Http\Request;
                 use Pype\Pipeline\Stage;
 
+                /**
+                 * Say what it reads from and puts in the request context, so `php bin/pype routes:check`
+                 * can check the routes that use it (Pype\Pipeline\Requires / Provides):
+                 *   #[Requires(User::class)]
+                 *   #[Provides(Thing::class)]
+                 */
                 final class {$class} implements Stage
                 {
                     public function handle(Request \$request, Closure \$next): mixed
                     {
                         return \$next(\$request);
+                    }
+                }
+                PHP,
+            'view' => <<<PHP
+                use Pype\Http\Request;
+                use Pype\View\ViewOutlet;
+
+                /**
+                 * A page. The stages before it load what it shows into the request context; data()
+                 * hands that to the template:
+                 *
+                 *   \$router->get('/things/{id}', [LoadThing::class, {$class}::class]);
+                 *
+                 * Ask for services in a constructor (they're autowired), add methods the template calls
+                 * as \$view->method().
+                 */
+                final class {$class} extends ViewOutlet
+                {
+                    protected function template(): string
+                    {
+                        return '{$this->viewTemplate($class)}';
+                    }
+
+                    /** Template variables. \$data is what the last stage returned, often nothing. */
+                    protected function data(mixed \$data, Request \$request): array
+                    {
+                        return [
+                            // 'thing' => \$request->context()->get(Thing::class),
+                        ];
                     }
                 }
                 PHP,

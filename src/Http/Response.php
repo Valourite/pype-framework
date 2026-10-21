@@ -29,6 +29,12 @@ final class Response
     /** @var list<Cookie> */
     private array $cookies = [];
 
+    /** @var array<string, mixed> */
+    private array $flash = [];
+
+    /** The Responsable this response was made from (a Page, ...), for outlets that want more than the data. */
+    private ?Responsable $source = null;
+
     /** @param array<string, string> $headers */
     public function __construct(
         private mixed $data = null,
@@ -90,10 +96,24 @@ final class Response
     {
         return match (true) {
             $result instanceof self => $result,
-            $result instanceof Responsable => $result->toResponse(),
+            $result instanceof Responsable => $result->toResponse()->withSource($result),
             $result === null => self::noContent(),
             default => self::make($result),
         };
+    }
+
+    public function withSource(Responsable $source): self
+    {
+        $clone = clone $this;
+        $clone->source = $source;
+
+        return $clone;
+    }
+
+    /** What a stage returned before it became this response, when that was a Responsable (a Page, ...). */
+    public function source(): ?Responsable
+    {
+        return $this->source;
     }
 
     public function status(): int
@@ -152,6 +172,27 @@ final class Response
         $clone->cookies = [...array_filter($this->cookies, static fn (Cookie $c) => $c->name !== $cookie->name), $cookie];
 
         return $clone;
+    }
+
+    /**
+     * Values to flash into the session for the next request, applied by StartSession on the
+     * way out (so a stage can return this without touching the session). Dropped on routes
+     * without a session ('web').
+     *
+     * @param array<string, mixed> $values
+     */
+    public function withFlash(array $values): self
+    {
+        $clone = clone $this;
+        $clone->flash = [...$this->flash, ...$values];
+
+        return $clone;
+    }
+
+    /** @return array<string, mixed> */
+    public function flashes(): array
+    {
+        return $this->flash;
     }
 
     public function isRedirect(): bool

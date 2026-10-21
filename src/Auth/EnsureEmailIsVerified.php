@@ -10,7 +10,9 @@ use Pype\Container\ContainerAware;
 use Pype\Exceptions\HttpException;
 use Pype\Http\Request;
 use Pype\Http\Response;
+use Pype\Pipeline\Requires;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
 
 /**
  * Lets only users with a verified email through. Put it after Authenticate:
@@ -20,8 +22,11 @@ use Pype\Pipeline\Stage;
  * Browsers go to $redirectTo (a page explaining what to do, with a "resend" button); API
  * clients get a 403.
  */
+#[Requires(Auth::USER)]
 final class EnsureEmailIsVerified implements Stage, ContainerAware
 {
+    use WithArguments;
+
     private ?Auth $auth = null;
 
     public function __construct(private readonly ?string $redirectTo = null)

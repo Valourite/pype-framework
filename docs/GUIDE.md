@@ -24,7 +24,7 @@ $router->get('/users/{id}/profile', [FindUser::class, ShowUser::class, UserProfi
 
 | Concept    | What it is                                                                                         |
 |------------|----------------------------------------------------------------------------------------------------|
-| Stage      | a step in a pipeline: class implementing `Stage`, configured instance, closure, or invokable class |
+| Stage      | a step in a pipeline: class implementing `Stage`, `stage(X::class, arg: ...)`, configured instance, closure, or invokable class |
 | Injection  | closures/invokables get params by type or name: `fn (User $user, int $id, Connection $db) => ...`  |
 | Context    | typed per-request store: `$request->context()->put($user)` / `->get(User::class)`                  |
 | Stack      | named reusable stage list: `$app->stack('admin', ['auth', EnsureAdmin::class])`                    |
@@ -34,6 +34,81 @@ $router->get('/users/{id}/profile', [FindUser::class, ShowUser::class, UserProfi
 
 Return values are normalised: `Response` as-is, `null` → 204, anything else → `{"data": ...}`.
 Exceptions become `{"error": {...}}` *inside* the pipeline, so outer stages still run.
+
+### Stages with arguments
+
+A class-string stage (`LoadQuote::class`) is built when a request reaches it, with its constructor's
+services autowired. When one stage class serves several routes, give it arguments with `stage()`,
+or `::with()` on stages that `use WithArguments`:
+
+```php
+use Pype\Pipeline\WithArguments;
+
+final class LoadDocumentsPage implements Stage
+{
+    use WithArguments;
+
+    public function __construct(private string $kind, private Connection $db) {}   // $kind given, $db autowired
+    ...
+}
+
+$router->get('/quotes', [ResolveListing::class, LoadDocumentsPage::with(kind: 'quote'), QuotesView::class]);
+$router->get('/invoices', [ResolveListing::class, stage(LoadDocumentsPage::class, kind: 'invoice'), InvoicesView::class]);
+```
+
+- Arguments go by name (or position); the constructor's other parameters are services.
+- Arguments are plain data: scalars, arrays, enums. Configuration known when the route is written goes
+  here; data made during the request goes in the context.
+- Nothing is loaded until a request reaches the stage, and each request gets a fresh instance, so a
+  stage may keep what it loaded in a property, even under OpenSwoole.
+- `new LoadDocumentsPage('quote')` still works, but it runs (and loads the class) while the routes
+  file runs, on every request under PHP-FPM, and the one instance is shared by every request a Swoole
+  worker serves. Services then need `ContainerAware`.
+- pype's own configured stages and outlets have `::with()` too: `Throttle::with(5, 60)`,
+  `Validate::with([...rules])` (and your `Validate` subclasses), `Authenticate::with(redirectTo: '/login')`,
+  `RedirectOutlet::with('quotes.show', flash: 'Saved.')`, `View::with('quotes/show')`. A closure argument
+  (`RedirectOnSuccess(fn ...)`) still needs `new`. The `'web'` and `'auth'` stacks are built this way.
+- Write your own `with()` instead of the trait for typed parameters:
+  `public static function with(string $kind): StageSpec { return stage(self::class, kind: $kind); }`.
+
+### Checking the order of stages
+
+Stages talk through the context, so order matters: a stage that reads a `Quote` must come after the
+one that puts it there. At runtime a missing entry throws `Context has no [Quote]`; to catch it without
+running the route, declare what each stage reads and puts:
+
+```php
+use Pype\Pipeline\{Provides, Requires};
+
+#[Requires(User::class)]
+#[Provides(Quote::class)]
+final class LoadQuote implements Stage { ... }
+
+// or, without attributes:
+final class LoadQuote implements Stage, DeclaresContext
+{
+    public static function requires(): array { return [User::class]; }
+    public static function provides(): array { return [Quote::class]; }
+}
+```
+
+```
+$ php bin/pype routes:check
+✗ GET /quotes/{id}: QuoteView needs [App\Data\Quote]; nothing before it provides it.
+✗ 41 routes checked, 1 problem.
+```
+
+- The key is what `put()` stored it under: the object's class. `Auth::USER` stands for the signed-in user
+  (the configured `auth.user` class); `Authenticate` provides it.
+- Global stages count first, then the route's stages with groups and stacks expanded. Outlets are checked
+  last, wherever they are listed. Closures and undeclared stages are skipped; a class-string that isn't a
+  class is reported.
+- pype's own stages are declared: `StartSession` provides `Session`, `VerifyCsrfToken` requires it,
+  `Validate` (and your subclasses) provide `ValidatedInput`, `Authenticate` provides the user, `RequestId`
+  provides `RequestIdValue`.
+- In a test: `$this->assertSame([], $this->app->checkRoutes());` (the skeleton has one).
+- It also prints hints for stages written as `new X(...)`: allowed, but built while routes load and shared
+  by every request in a worker; `X::with(...)` or `X::class` avoid that.
 
 ## Built in
 
@@ -51,7 +126,9 @@ Exceptions become `{"error": {...}}` *inside* the pipeline, so outer stages stil
 | `new Cors([...origins])`            | CORS headers + preflight                                                |
 | `new JsonBody(maxBytes: ...)`       | 413 on big bodies, 400 on malformed JSON                                |
 | `new MethodOverride()` (global)     | forms send PUT/PATCH/DELETE via a hidden `_method` field                |
-| `new RedirectOnSuccess($to, $msg)`  | reuse an API handler from a form: redirect + flash on success           |
+| `new RedirectOnSuccess($to, $msg)`  | reuse an API handler from a form: redirect + flash on success; `$to` is a path or a route name |
+| `new RedirectOutlet('route', ...)`  | end a route with a redirect on success, the way `View` ends one with a page (see Redirects) |
+| `redirect('route', flash: '...')`   | return from any stage to stop there and redirect (see Redirects)       |
 
 ## Two ways in: pages and JSON
 
@@ -78,14 +155,105 @@ Forms in templates:
 
 ```php
 <form method="post" action="/login">
-    <?= $this->csrf() ?>
-    <input name="email" value="<?= e($this->old('email')) ?>">
-    <?= e($this->error('email')) ?>
+    <input type="hidden" name="_token" value="<?= e($csrf) ?>">
+    <input name="email" value="<?= e($old('email')) ?>">
+    <?php if ($message = $error('email')): ?><p class="error"><?= e($message) ?></p><?php endif ?>
 </form>
 ```
 
+Every template rendered for a request (the page, its layout, its partials) gets these, and pype
+writes no HTML for you:
+
+| Variable | What |
+|---|---|
+| `$csrf` | the CSRF token. Needs the `'web'` stack; using it without one throws and says so |
+| `$old('email', default: '')` | what was typed before a failed submission. Dots reach nested input: `$old('lines.3.quantity')` is `lines[3][quantity]` |
+| `$error('email')` | the first validation error for that field, or `null` |
+| `$errors` | all of them: `['email' => ['...'], ...]` |
+
+Your own data wins if it uses one of these names. Don't assign to `$error` or `$old` in a template
+(`$error = ...` replaces the helper): name the result `$message`. `$this->csrf()`, `$this->old()`
+and `$this->error()` still work.
+
 A session cookie only authenticates routes in the `'web'` stack, so every cookie-authenticated
 form post is CSRF-checked.
+
+### Route files
+
+`$app->routes($file)` loads one file. `$app->routesIn($dir)` loads every `.php` file under a folder,
+subfolders included, so a new file needs no line in `bootstrap/app.php`:
+
+```php
+$app->routesIn(__DIR__ . '/../routes');
+```
+
+```
+routes/web.php            as it is
+routes/api.php            under /api; route names get api. in front
+routes/quotes/web.php     as it is
+routes/quotes/api.php     under /api; ->name('index') in a quotes. group is api.quotes.index
+routes/_helpers.php       skipped: files and folders starting with _ are never loaded
+routes/schedule.php       skipped: the schedule commands read it
+```
+
+Only the file name `api.php` is special. Every other file is loaded as it is, and its own groups
+decide the path, stages and name prefix. Files load in alphabetical order, folder by folder; that
+order only matters for overlapping patterns (`/{a}/edit` and `/quotes/{id}`): a path with no
+`{params}` such as `/quotes/new` always wins over `/quotes/{id}`. Two routes with the same name
+throw while loading. `php bin/pype optimize` compiles every route, whichever file it came from.
+
+`php bin/pype make:routes quotes` writes `routes/quotes/web.php` (a group in `['web']`) and
+`routes/quotes/api.php` (a group in `['auth']`); `--web` or `--api` writes only one. Nothing is
+forced: change the stages to whatever that file needs.
+
+### Resource routes
+
+The usual routes of one kind of thing, each with its own stages; leave a key out and that route
+doesn't exist:
+
+```php
+$router->resource('/items', [
+    'index'   => [ResolveListing::class, LoadItems::class, ItemsView::class],                     // GET    /items
+    'create'  => [ItemFormView::class],                                                          // GET    /items/new
+    'store'   => [ValidateItem::class, CreateItem::class, RedirectOutlet::with('items.index')],   // POST   /items
+    'show'    => [LoadItem::class, ItemView::class],                                             // GET    /items/{id}
+    'edit'    => [LoadItem::class, ItemFormView::class],                                         // GET    /items/{id}/edit
+    'update'  => [LoadItem::class, ValidateItem::class, UpdateItem::class, RedirectOutlet::with('items.show')], // PATCH /items/{id}
+    'destroy' => [LoadItem::class, DeleteItem::class, RedirectOutlet::with('items.index')],      // DELETE /items/{id}
+]);
+```
+
+- Names: `items.index` ... `items.destroy`, after a named group's prefix (and `api.` in an `api.php`
+  file). `name: 'stock'` changes the `items` part; `param: 'item'` names the placeholder.
+- `apiResource()` is the same without `create` and `edit` (form pages). A key that isn't one of these
+  is an error, so a typo (`'delete'`) doesn't quietly drop a route.
+- They are ordinary routes: `bin/pype routes` lists them, `routes:check` checks them, and you can still
+  add others next to them.
+
+### Redirects
+
+Two ways, depending on who decides:
+
+```php
+// The route decides: on success, redirect. {id} comes from the matched route by itself.
+$router->post('/quotes/{id}/accept', [LoadQuote::class, AcceptQuote::class, new RedirectOutlet('quotes.show', flash: 'Quote accepted.')]);
+
+// From what the handler returned (a new record's id):
+new RedirectOutlet('quotes.show', fn (Quote $quote) => ['id' => $quote->id])
+
+// A stage decides, and nothing after it runs:
+if ($quote === null) {
+    return redirect('quotes.index', flash: 'That quote no longer exists.');
+}
+```
+
+- `$to` is a route name, or a path/URL (starts with `/` or has `://`).
+- A string flash is the `status` message (`$this->session()->get('status')`); pass an array for others.
+- `RedirectOutlet` only acts on success. Errors pass through (`'web'` sends validation errors back to
+  the form), a stage's `redirect()` keeps its own target, and JSON clients get the data, so the same
+  route serves a form and the API.
+- The flash travels on the response (or, for `RedirectOutlet`, in the context) and the `'web'` stack's
+  `StartSession` writes it to the session. On a route without a session it is dropped.
 
 ### API tokens or JWTs?
 
@@ -150,6 +318,35 @@ fixed per route and can't see the signed-in user, so "unique per user" (`sku` un
 user's items) is a unique index on `(user_id, sku)` plus a check in the handler (or the
 `PDOException` → 409 mapping in `AppProvider`).
 
+### Tidy the input first: `prepare()`
+
+Forms with rows (the lines of a quote) send the rows the user left empty too. Drop them in the
+`Validate` subclass, before the rules run, and **keep the keys**:
+
+```php
+final class ValidateQuote extends Validate
+{
+    protected function prepare(array $input): array
+    {
+        $input['lines'] = array_filter($input['lines'] ?? [], fn (array $row) => array_filter($row) !== []);
+
+        return $input;
+    }
+
+    protected function rules(): array
+    {
+        return ['lines' => 'required|array|min:1', 'lines.*.item_id' => 'required|int', 'lines.*.quantity' => 'required|int|min:1'];
+    }
+}
+```
+
+- An error names the row the browser shows: a bad quantity in the third row is `lines.2.quantity`, even
+  with row 1 empty, so `$error('lines.2.quantity')` sits under the right row.
+- The request isn't changed: a failed form comes back exactly as typed (`$old('lines.2.quantity')`), and
+  later stages still see what was sent.
+- `ValidatedInput` gets the prepared data, numbered again where a list lost rows (`0, 2, 4` → `0, 1, 2`),
+  so the handler loops over clean rows. Arrays keyed on purpose (`prices[17]`) keep their keys.
+
 ## Forgotten passwords and email verification
 
 Both flows are app code you can change (routes in `routes/web.php`, handlers in
@@ -212,6 +409,14 @@ default `MAIL_DRIVER=log` writes emails to the log (see them in the log viewer);
 emails rendered locally, run [Mailpit](https://mailpit.axllent.org) and use `MAIL_HOST=127.0.0.1`,
 `MAIL_PORT=1025`, `MAIL_ENCRYPTION=none`. Sending goes through PHPMailer.
 
+**The dev mailbox.** With `APP_DEBUG=true`, every message the app sends is also kept (as a file in
+`storage/mail`, newest 100) and listed at `/_pype/mail`: subject, recipients, the HTML in a sandboxed
+frame, the text, and every link in it, clickable, so you can follow a signed link (a quote for a
+customer, a password reset) without a mail server. It works with any driver except `array`/`null`.
+With `MAIL_DRIVER=log` the page says plainly that nothing was delivered, and `php bin/pype serve` prints
+it at start-up with the mailbox's address. Settings in `config/mail.php` `mailbox` (`MAIL_MAILBOX` turns
+it off); outside debug it only runs when enabled and given `stages` that guard it, like the log viewer.
+
 ## Roles, ownership and per-user limits
 
 pype has no roles or policy system; these are stages you write (a few lines each).
@@ -247,10 +452,28 @@ $router->group('/quotes/{id}', ['auth', LoadQuote::class], fn (Router $r) => $r-
 **Admins:** a column (`users.role` or `is_admin`), a stage that checks it after `Authenticate`,
 and a named stack: `$app->stack('admin', ['web', new Authenticate(redirectTo: '/login'), EnsureAdmin::class])`.
 
-**Per-user rate limits:** `Throttle` counts per IP and route. For a per-user limit, a stage
-that injects `Pype\RateLimit\RateLimiter` (bound by `DatabaseProvider`, database or APCu per
-`RATE_LIMIT_DRIVER`), calls `[$hits, $resetAt] = $limiter->hit("invoices.{$user->id}", 60)` and
-throws `HttpException::tooManyRequests($resetAt - time())` once `$hits` is over the limit.
+**Per-user rate limits:** `Throttle` counts per IP and route by default. `by:` counts per signed-in
+user instead (all their devices together; guests fall back to their IP), and `key:` lets several
+routes share one counter (otherwise `/quotes/1/send` and `/quotes/2/send` count separately):
+
+```php
+Throttle::with(20, 3600, by: User::class, key: 'send')   // 20 sends an hour per user, quotes and invoices together
+```
+
+`by:` names a context entry with an `id` (`Auth::USER` means the configured user class).
+
+**Unique (or existing) per company / per user:** rules can read the signed-in user. In a string rule,
+`col=value` pairs narrow the check and `{user.prop}` is a property of the user `Authenticate` put in
+the context:
+
+```php
+Validate::with(['sku' => 'required|unique:items,sku,{id},id,company_id={user.company_id}'])   // per company; {id} skips the row being edited
+Validate::with(['item_id' => 'required|exists:items,id,company_id={user.company_id}'])       // only this company's items
+```
+
+For anything more, override `rulesFor(Request $request)` in a `Validate` subclass and build rule
+objects from the context: `new Unique('items', 'sku', where: ['company_id' => $user->company_id])`.
+A unique index on the columns still backs it up (two requests at once).
 
 ## Cache
 
@@ -509,7 +732,15 @@ return new class extends Migration {
 
 Columns: `id`, `foreignId`, `string`, `text`, `integer`, `bigInteger`, `boolean`, `decimal`,
 `date`, `timestamp`, `timestamps`, `json`, `longText`. Modifiers: `nullable`, `default`, `useCurrent`,
-`unique`, `primary`, `index`, `check`, `constrained`. `$schema->table(...)` adds/renames/drops
+`unique`, `primary`, `index`, `check`, `constrained`, `withoutIndex`.
+
+`constrained()` also indexes the column on SQLite and Postgres, which (unlike MySQL) don't index
+foreign keys themselves: without it, "the lines of this quote" (`WHERE quote_id = ?`) and every
+cascade check on a delete scan the whole table. It is skipped when a composite index you declared
+already starts with the column (`$t->unique(['company_id', 'sku'])` covers `company_id`); opt out
+with `->withoutIndex()`. Dropping the column again (`down()`) drops that index first.
+
+`$schema->table(...)` adds/renames/drops
 columns and indexes, and `$schema->raw($sql)` runs anything else. Prefer plain SQL? `make:migration
 add_search_view --sql` writes a `.sql` file instead; both kinds can sit side by side. In a
 `.sql` file, the SQL after a `-- down` line undoes the part above it.
@@ -528,6 +759,42 @@ is off unless you add `--force`. On MySQL each schema change is committed as it 
 migration that fails halfway may leave part of its changes behind; SQLite and Postgres undo the
 whole file. Once a migration has run in production, change things with a new migration rather
 than rolling back: rolling back drops data.
+
+### Pagination
+
+```php
+fn (Request $request, Connection $db) => $db->table('quotes')->where('status', 'sent')->latest()->paginate(25, $request)
+```
+
+- Given the `Request`, the page number comes from `?page=` (anything odd is page 1), and past the end
+  (`?page=99999`) you get the last page.
+- Return the `Page`: JSON clients get `{"data": [...], "meta": {"pagination": {page, per_page, total, last_page}}}`;
+  a view gets the items as its data and the `Page` itself as `$page`. Put it in an array or the context
+  yourself and it is the same object.
+- Links keep the request's other query parameters (`?status=`, `?q=`, `?month=`), so filters survive paging:
+
+```php
+<nav class="pages">
+    <?php if ($url = $page->previousUrl()): ?><a href="<?= e($url) ?>">← Previous</a><?php endif ?>
+    <?php foreach ($page->links() as $link): ?>
+        <?php if ($link->gap): ?><span>…</span>
+        <?php elseif ($link->current): ?><strong aria-current="page"><?= $link->number ?></strong>
+        <?php else: ?><a href="<?= e($link->url) ?>"><?= $link->number ?></a>
+        <?php endif ?>
+    <?php endforeach ?>
+    <?php if ($url = $page->nextUrl()): ?><a href="<?= e($url) ?>">Next →</a><?php endif ?>
+</nav>
+```
+
+  `links()` gives the first and last page and two either side of the current one (`links(1)` for one):
+  `1 … 7 8 [9] 10 11 … 9000`. pype ships no markup; this loop is yours.
+- **Big tables.** The total is a `COUNT(*)` over the whole query, joins included. Give a cheaper one, or a
+  number you have: `paginate(25, $request, count: $db->table('quotes')->where('company_id', $id))`,
+  `count: $cache->remember(...)`. Or skip the total: `simplePaginate(25, $request)` fetches one extra row
+  to know whether there's a next page, runs no count, and has only `previousUrl()`/`nextUrl()`
+  (`{"has_more": true}` in JSON).
+- `paginate(25, 3)` (an int) still works; its links are just `?page=N`. Another parameter name:
+  `paginate(25, $request, pageName: 'p')`.
 
 ## Factories and seeders
 
@@ -560,6 +827,10 @@ UserFactory::new($this->db)->create()->id`) is only created when nothing else su
 
 `Pype\Database\Fake` gives names, emails (never repeated within a run), words, sentences,
 numbers, dates, UUIDs, `pick()` from a list and `unique()`; `new Fake(seed: 42)` repeats exactly.
+`unique()` never repeats a value; once a list is used up (about 500 words) it numbers them instead
+(`desk2`, `ada.smith2@example.test`), so a seeder can ask for thousands. `create()` returns your
+`$class` objects, or, for a factory without one, `Pype\Database\Row` objects: `$row->id` and
+`$row['id']` both work, and a column that isn't there warns instead of quietly being `null`.
 For realistic, local data (South African addresses, phone and ID numbers, 75 locales),
 `composer require --dev fakerphp/faker` (MIT, ~12 MB) and call it inside `definition()`:
 `\Faker\Factory::create('en_ZA')->idNumber()`. It's dev-only, so don't use it in seeders that
@@ -594,9 +865,40 @@ public function test_creating_a_post(): void
 }
 ```
 
-- **Browsers:** `$this->client` keeps the session cookie between requests; forms need the CSRF
-  token from the page (see `tests/Feature/WebAuthTest.php`). `$this->client->withoutCookies()` is
-  a second browser; `$res->header('Location')` checks redirects.
+- **Stages on their own:** `Pype\Testing\Chain` runs a list of stages the way a route would (container,
+  `::with()` arguments, stacks, outlets), without HTTP. Fill the context with what earlier stages would
+  have put there, then look at what these left:
+
+  ```php
+  $result = Chain::of([LoadQuote::class, PrepareQuote::class], $this->app)
+      ->with($user)                 // as if Authenticate had run
+      ->params(['id' => $quote->id])
+      ->run('GET /quotes/' . $quote->id);
+
+  $this->assertTrue($result->reachedEnd());                        // every stage called $next
+  $this->assertSame('Q-0001', $result->context()->get(Quote::class)->number);
+  ```
+
+  Exceptions reach the test (`expectException(HttpException::class)` for a 404); a stage that stops with
+  `redirect()` shows in `$result->status()`; `$result->data()` / `->body()` give what the last stage
+  returned. See the skeleton's `tests/Unit/FindUserTest.php`.
+- **Browsers:** `$this->client` keeps the session cookie between requests.
+  `$this->client->submit('/items/new', '/items', ['name' => 'Desk'])` loads the form page, takes its
+  CSRF token and posts like a browser (the page is the Referer, so a failed validation comes back to
+  it); add `'_method' => 'PATCH'` for other verbs. `$this->client->actingAs($user)` signs in without
+  the login form. `withoutCookies()` is a second browser. See `tests/Feature/WebAuthTest.php`.
+- **Assertions** on every response, chainable: `assertOk()`, `assertStatus(419)`, `assertCreated()`,
+  `assertNoContent()`, `assertUnauthorized()`, `assertForbidden()`, `assertNotFound()`,
+  `assertUnprocessable()`, `assertRedirect('/account')`, `assertSee('<h1>Ada</h1>')` /
+  `assertDontSee()` (the text as it appears in the HTML), `assertJson(['data' => ['id' => 1]])` (a subset),
+  `assertJsonPath('data.name', 'Ada')`, `assertHeader()`, `assertCookie()`, and `assertInvalid('email')`
+  (a validation error for that field, from an API 422 or sent back to a form):
+
+  ```php
+  $this->client->submit('/login', '/login', ['email' => 'ada@example.com', 'password' => 'nope'])
+      ->assertRedirect('/login')
+      ->assertInvalid('password');
+  ```
 - **`phpunit.xml`** sets the test environment: in-memory SQLite, `MAIL_DRIVER=array`,
   `CACHE_DRIVER=array`, `QUEUE_DRIVER=sync` (jobs run at once), a fixed `APP_KEY` (signed links),
   and logs in `storage/logs/testing`.
@@ -634,7 +936,14 @@ It starts one worker per CPU core (the container's CPU limit, if it has one): be
 are CPU-bound, as with SQLite. If requests mostly wait on a network database, an outside API or
 password hashing, try `--workers` at 2-4 per core and measure.
 
-It serves `public/` files too, so no nginx is needed (put one in front for TLS if you like).
+It serves `public/` files too, so no nginx is needed (put one in front for TLS if you like). pype
+serves them itself (`SwooleServer::serveStatic()`: GET/HEAD only, nothing outside `public/`, never PHP
+files or dotfiles, `Last-Modified` and 304). Swoole's own static handler is off because, in Swoole
+6.2.3, it left the connection corked: every later response on it, pages included, waited about 200 ms.
+Set `app.swoole.static_handler` to `true` to turn it back on (e.g. if nginx serves `public/` anyway
+and you want to test a newer Swoole). Any other server setting goes in `app.swoole.settings`, passed
+through as is (`'package_max_length' => 16 * 1024 * 1024`, timeouts, buffers); `workers`,
+`max_request` and `--workers` win over it.
 Workers handle one request at a time, so your code runs exactly as under PHP-FPM. Two
 differences: code changes need a restart, and anything you store in a static variable or
 singleton outlives the request. Keep per-request data on the `Request` (its context), as
@@ -658,10 +967,35 @@ override `payload()` to change the JSON envelope. `php bin/pype make:outlet CsvO
 
 Plain PHP templates in `resources/views`, styled by `public/css/app.css` (no build step).
 
-- Quick: `new View('welcome')` at the end of a route.
-- Class-based: extend `Pype\View\ViewOutlet` (see `app/Views/UserProfile.php`) — choose the template,
-  shape the data in `data()`, inject services in the constructor, and call its methods from the
-  template as `$view->initials($user)`.
+- Quick: `View::with('welcome')` at the end of a route, for a page with nothing to load or whose last
+  stage returns an array of variables.
+- A page outlet (the usual shape): `php bin/pype make:view QuoteView` writes `app/Views/QuoteView.php`
+  and `resources/views/quote.php`. Extend `Pype\View\ViewOutlet`: choose the template, read what the
+  stages loaded from the context in `data()`, ask for services in the constructor, and call its
+  methods from the template as `$view->total($quote)`.
+
+A route is then stages that load, in order, and the page that shows:
+
+```php
+$router->get('/quotes/{id}', [LoadQuote::class, LoadCustomer::class, QuoteView::class]);
+
+final class QuoteView extends ViewOutlet
+{
+    protected function template(): string { return 'quotes/show'; }
+
+    protected function data(mixed $data, Request $request): array
+    {
+        return [
+            'quote' => $request->context()->get(Quote::class),        // throws if LoadQuote didn't run
+            'customer' => $request->context()->get(Customer::class),
+        ];
+    }
+}
+```
+
+Each class does one thing and can be tested alone. The same stages serve JSON: end the API route with
+a stage that returns the data instead of a page outlet. After a form, end with `RedirectOutlet` (see
+Redirects).
 
 ```php
 <?php $this->layout('layouts/app', ['title' => $data->name]) ?>
@@ -670,4 +1004,37 @@ Plain PHP templates in `resources/views`, styled by `public/css/app.css` (no bui
 ```
 
 Errors on HTML routes render `errors/{status}.php`, falling back to `errors/error.php`.
+
+### Latte or Blade instead of plain PHP
+
+The file extension picks the engine; nothing to configure, and pages can mix them:
+
+| File | Engine | Install |
+|---|---|---|
+| `quotes/show.php` | plain PHP | nothing |
+| `quotes/show.latte` | [Latte](https://latte.nette.org) | `composer require latte/latte` |
+| `quotes/show.blade.php` | [BladeOne](https://github.com/EFTEC/BladeOne) (Blade syntax, no dependencies) | `composer require eftec/bladeone` |
+
+```latte
+{layout 'layouts/app.latte'}
+{block content}
+    <h1>{$quote->number}</h1>                                  {* escaped by default *}
+    <form method="post">
+        <input type="hidden" name="_token" value="{$csrf}">
+        <input name="email" value="{$old('email')}">
+        {if $error('email')}<p>{$error('email')}</p>{/if}
+    </form>
+{/block}
+```
+
+- Routes and outlets don't change: `View::with('quotes/show')`, or a page outlet's `template()`.
+  Without an extension the name takes the first of `.blade.php`, `.latte`, `.php` that exists; write
+  `quotes/show.latte` to choose.
+- Every engine gets the same variables: your data, `$view`, `$meta`, `$request`, `$csrf`, `$old()`,
+  `$error()`, `$errors`. Layouts and includes are the engine's own (`{layout}`/`{include}`,
+  `@extends`/`@include`); names are from the views root in all three.
+- Latte and BladeOne load only when one of their templates renders, and compile into
+  `storage/views` (`app.view_cache`). BladeOne is built fresh per render so its sections never leak
+  between requests in a worker. A template whose package is missing says which `composer require` to run.
+
 

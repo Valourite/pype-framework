@@ -10,7 +10,9 @@ use Pype\Container\ContainerAware;
 use Pype\Http\Cookie;
 use Pype\Http\Request;
 use Pype\Http\Response;
+use Pype\Pipeline\Provides;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
 
 /**
  * Loads the session from its cookie, puts it in the context, and saves it afterwards.
@@ -21,8 +23,11 @@ use Pype\Pipeline\Stage;
  *   ['web', ...]                                   // 'web' stack (SessionProvider) starts with this
  *   [new StartSession(lifetimeMinutes: 30), ...]   // or configure it yourself
  */
+#[Provides(Session::class)]
 final class StartSession implements Stage, ContainerAware
 {
+    use WithArguments;
+
     private ?SessionStore $store = null;
 
     public function __construct(
@@ -52,6 +57,19 @@ final class StartSession implements Stage, ContainerAware
         $request->context()->put($session);
 
         $response = Response::from($next($request));
+
+        foreach ($response->flashes() as $key => $value) {
+            $session->flash($key, $value);
+        }
+
+        // An outlet (RedirectOutlet) wraps this stage, so it decides after the session is saved:
+        // it leaves what to flash on success in the context, and the same rule applies here.
+        $pending = $request->context()->find(FlashOnSuccess::class);
+        if ($pending !== null && $pending->appliesTo($response, $request)) {
+            foreach ($pending->values as $key => $value) {
+                $session->flash($key, $value);
+            }
+        }
 
         foreach ($session->replacedIds() as $old) {
             $store->destroy($old);

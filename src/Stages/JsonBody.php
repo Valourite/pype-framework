@@ -8,6 +8,7 @@ use Closure;
 use Pype\Exceptions\HttpException;
 use Pype\Http\Request;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
 
 /**
  * Guards request bodies: rejects oversized bodies (413), malformed JSON (400)
@@ -19,6 +20,8 @@ use Pype\Pipeline\Stage;
  */
 final class JsonBody implements Stage
 {
+    use WithArguments;
+
     public function __construct(
         private readonly int $maxBytes = 1_048_576,
         private readonly bool $requireJson = false,

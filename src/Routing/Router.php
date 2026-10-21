@@ -9,6 +9,7 @@ use LogicException;
 use Pype\Exceptions\HttpException;
 use Pype\Outlet\Outlet;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\StageSpec;
 
 /**
  * Registers routes and resolves an incoming method + path to a Route.
@@ -97,6 +98,7 @@ final class Router
     {
         return match (true) {
             is_string($stage) => str_contains($stage, '\\') ? substr((string) strrchr($stage, '\\'), 1) : $stage,
+            $stage instanceof StageSpec => self::describe($stage->class),
             $stage instanceof Closure => 'Closure',
             default => (new \ReflectionClass($stage))->getShortName(),
         };
@@ -104,7 +106,21 @@ final class Router
 
     public static function isOutlet(mixed $stage): bool
     {
-        return $stage instanceof Outlet || (is_string($stage) && is_subclass_of($stage, Outlet::class));
+        return $stage instanceof Outlet
+            || (is_string($stage) && is_subclass_of($stage, Outlet::class))
+            || ($stage instanceof StageSpec && is_subclass_of($stage->class, Outlet::class));
+    }
+
+    /**
+     * Stack names replaced by their stages, in order, outlets left where they are (for listings
+     * and routes:check; compile() is what runs).
+     *
+     * @param list<string|object> $stages
+     * @return list<string|object>
+     */
+    public function expandStacks(array $stages): array
+    {
+        return $this->expand($stages);
     }
 
     /** @param list<string> $trail stack names being expanded, for cycle detection */
@@ -179,6 +195,72 @@ final class Router
         $this->static = $this->dynamic = $this->named = null;
 
         return $route;
+    }
+
+    /** The routes of resource(), in registration order: method, path under the resource, name. */
+    private const RESOURCE = [
+        'index' => ['GET', ''],
+        'create' => ['GET', '/new'],
+        'store' => ['POST', ''],
+        'show' => ['GET', '/{param}'],
+        'edit' => ['GET', '/{param}/edit'],
+        'update' => ['PATCH', '/{param}'],
+        'destroy' => ['DELETE', '/{param}'],
+    ];
+
+    /**
+     * The usual routes of one kind of thing, each with its own stages; leave a key out and that
+     * route doesn't exist:
+     *
+     *   $router->resource('/items', [
+     *       'index'   => [ResolveListing::class, LoadItems::class, ItemsView::class],   // GET    /items
+     *       'create'  => [ItemFormView::class],                                        // GET    /items/new
+     *       'store'   => [ValidateItem::class, CreateItem::class, RedirectOutlet::with('items.index')],  // POST /items
+     *       'show'    => [LoadItem::class, ItemView::class],                           // GET    /items/{id}
+     *       'edit'    => [LoadItem::class, ItemFormView::class],                       // GET    /items/{id}/edit
+     *       'update'  => [LoadItem::class, ValidateItem::class, UpdateItem::class, ...],  // PATCH /items/{id}
+     *       'destroy' => [LoadItem::class, DeleteItem::class, ...],                    // DELETE /items/{id}
+     *   ]);
+     *
+     * Routes are named items.index ... items.destroy (inside a named group, after its prefix); $name
+     * changes the "items" part (default: the path, slashes as dots, {params} left out). $param names
+     * the id placeholder. It only adds ordinary routes: `bin/pype routes` shows them as usual.
+     *
+     * @param array<string, string|object|list<string|object>> $actions
+     * @return array<string, Route> the routes made, by action
+     */
+    public function resource(string $path, array $actions, ?string $name = null, string $param = 'id'): array
+    {
+        return $this->addResource($path, $actions, $name, $param, array_keys(self::RESOURCE));
+    }
+
+    /** resource() for JSON: no create or edit (those are form pages). */
+    public function apiResource(string $path, array $actions, ?string $name = null, string $param = 'id'): array
+    {
+        return $this->addResource($path, $actions, $name, $param, ['index', 'store', 'show', 'update', 'destroy']);
+    }
+
+    /**
+     * @param list<string> $allowed
+     * @return array<string, Route>
+     */
+    private function addResource(string $path, array $actions, ?string $name, string $param, array $allowed): array
+    {
+        if (($unknown = array_diff(array_keys($actions), $allowed)) !== []) {
+            throw new LogicException(sprintf('Resource [%s] has no [%s] route; use: %s.', $path, implode(', ', $unknown), implode(', ', $allowed)));
+        }
+
+        $name ??= trim(str_replace('/', '.', (string) preg_replace('#/?\{\w+\}#', '', $path)), '.');
+        $routes = [];
+
+        foreach (self::RESOURCE as $action => [$method, $suffix]) {
+            if (isset($actions[$action])) {
+                $routes[$action] = $this->add($method, rtrim($path, '/') . str_replace('{param}', '{' . $param . '}', $suffix), $actions[$action])
+                    ->name("{$name}.{$action}");
+            }
+        }
+
+        return $routes;
     }
 
     /**
@@ -444,20 +526,34 @@ final class Router
     {
         // Names are set after add() (->name() is chained), so a miss rebuilds the index once.
         if (!isset($this->named[$name])) {
-            $this->named = [];
-            foreach ($this->routes as $route) {
-                $routeName = $route->name();
-                if ($routeName === null) {
-                    continue;
-                }
-                if (isset($this->named[$routeName])) {
-                    throw new LogicException("Two routes are named [{$routeName}]: {$this->named[$routeName]->method()} {$this->named[$routeName]->path()} and {$route->method()} {$route->path()}.");
-                }
-                $this->named[$routeName] = $route;
-            }
+            $this->names();
         }
 
         return $this->named[$name] ?? null;
+    }
+
+    /**
+     * Every named route, by name (rebuilt on each call).
+     *
+     * @return array<string, Route>
+     * @throws LogicException when two routes share a name
+     */
+    public function names(): array
+    {
+        $this->named = [];
+
+        foreach ($this->routes as $route) {
+            $routeName = $route->name();
+            if ($routeName === null) {
+                continue;
+            }
+            if (isset($this->named[$routeName])) {
+                throw new LogicException("Two routes are named [{$routeName}]: {$this->named[$routeName]->method()} {$this->named[$routeName]->path()} and {$route->method()} {$route->path()}.");
+            }
+            $this->named[$routeName] = $route;
+        }
+
+        return $this->named;
     }
 
     /** @return list<Route> */

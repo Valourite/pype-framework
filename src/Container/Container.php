@@ -94,7 +94,23 @@ final class Container implements ContainerInterface
         return $this->build($id);
     }
 
-    private function build(string $class): object
+    /**
+     * A new instance of $class (bindings and singletons are not used), with $args for the
+     * constructor parameters they name (string keys) or position (int keys) and the rest
+     * resolved as usual. Used for stage() specs.
+     *
+     * @template T of object
+     * @param class-string<T> $class
+     * @param array<int|string, mixed> $args
+     * @return T
+     */
+    public function makeWith(string $class, array $args): object
+    {
+        return $this->build($class, $args);
+    }
+
+    /** @param array<int|string, mixed> $given */
+    private function build(string $class, array $given = []): object
     {
         if (!class_exists($class)) {
             throw new NotFoundException("Cannot resolve [{$class}]: no binding and class does not exist.");
@@ -109,14 +125,33 @@ final class Container implements ContainerInterface
         $constructor = $reflection->getConstructor();
 
         if ($constructor === null) {
+            if ($given !== []) {
+                throw new ContainerException("Cannot build [{$class}] with arguments: it has no constructor.");
+            }
+
             return new $class();
         }
 
+        $params = $constructor->getParameters();
+
+        foreach (array_keys($given) as $key) {
+            $known = is_int($key) ? $key < count($params) : array_filter($params, static fn ($p) => $p->getName() === $key) !== [];
+            if (!$known) {
+                throw new ContainerException(is_int($key)
+                    ? "Cannot build [{$class}]: argument #{$key} is past its constructor's parameters."
+                    : "Cannot build [{$class}]: its constructor has no parameter \${$key}.");
+            }
+        }
+
         $args = [];
-        foreach ($constructor->getParameters() as $param) {
+        foreach ($params as $param) {
             $type = $param->getType();
 
-            if ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
+            if (array_key_exists($param->getName(), $given)) {
+                $args[] = $given[$param->getName()];
+            } elseif (array_key_exists($param->getPosition(), $given)) {
+                $args[] = $given[$param->getPosition()];
+            } elseif ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
                 try {
                     $args[] = $this->make($type->getName());
                 } catch (ContainerException|NotFoundException $e) {

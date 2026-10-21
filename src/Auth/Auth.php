@@ -18,6 +18,12 @@ use Pype\Database\Connection;
  */
 final class Auth
 {
+    /**
+     * Context key for the signed-in user in #[Requires]/#[Provides]: stands for the configured user
+     * class (auth.user), which Authenticate puts the user under. routes:check swaps it in.
+     */
+    public const USER = 'auth.user';
+
     private const TOKEN_PREFIX = 'pype_';
 
     // Random-password bcrypt hashes at PHP's default cost (10 before 8.4, 12 from 8.4), used to keep

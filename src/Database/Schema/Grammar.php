@@ -52,6 +52,12 @@ final class Grammar
         }
 
         foreach ($table->dropColumns as $column) {
+            if ($this->driver === 'sqlite') {
+                // SQLite refuses to drop an indexed column. Drop the index a foreign key got
+                // (or a plain ->index() under the default name) first, so down() undoes up().
+                $statements[] = 'DROP INDEX IF EXISTS ' . $this->db->quote("{$table->name}_{$column}_index");
+            }
+
             $statements[] = "ALTER TABLE {$name} DROP COLUMN {$this->db->quote($column)}";
         }
 
@@ -163,6 +169,8 @@ final class Grammar
         foreach ($table->columns as $column) {
             if ($column->index !== null) {
                 $indexes[] = ['columns' => [$column->name], 'name' => $column->index ?: "{$table->name}_{$column->name}_index", 'unique' => false];
+            } elseif ($this->needsForeignKeyIndex($table, $column)) {
+                $indexes[] = ['columns' => [$column->name], 'name' => "{$table->name}_{$column->name}_index", 'unique' => false];
             }
         }
 
@@ -176,6 +184,26 @@ final class Grammar
             ),
             $indexes,
         );
+    }
+
+    /**
+     * SQLite and Postgres don't index foreign key columns, so every "rows of this parent" lookup
+     * (WHERE quote_id = ?) and every cascade/restrict check on the parent scans the whole table.
+     * MySQL creates the index itself. Skipped when an index already starts with the column.
+     */
+    private function needsForeignKeyIndex(Table $table, Column $column): bool
+    {
+        if ($column->references === null || !$column->indexForeignKey || $this->driver === 'mysql' || $column->unique || $column->primary) {
+            return false;
+        }
+
+        foreach ($table->indexes as $index) {
+            if ($index['columns'][0] === $column->name) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function literal(mixed $value): string

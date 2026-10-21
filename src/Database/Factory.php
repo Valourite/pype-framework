@@ -12,7 +12,7 @@ use Closure;
  *   final class UserFactory extends Factory
  *   {
  *       protected string $table = 'users';
- *       protected ?string $class = User::class;    // what create() returns (null: arrays)
+ *       protected ?string $class = User::class;    // what create() returns (null: Row objects)
  *
  *       protected function definition(Fake $fake): array
  *       {
@@ -34,7 +34,7 @@ abstract class Factory
     /** The table rows go into. */
     protected string $table = '';
 
-    /** @var class-string|null the data class create() returns rows as; null = arrays */
+    /** @var class-string|null the data class create() returns rows as; null = Row ($row->id and $row['id']) */
     protected ?string $class = null;
 
     protected readonly Fake $fake;
@@ -116,7 +116,8 @@ abstract class Factory
 
     /**
      * Insert the rows and return them as stored (ids and database defaults filled in), as
-     * $class objects or arrays. One INSERT ... RETURNING per row, so ids are known.
+     * $class objects, or Row objects without a $class (always objects, so $row->id works either
+     * way). One INSERT ... RETURNING per row, so ids are known.
      *
      * @return object|array<string, mixed>|list<object|array<string, mixed>>
      */
@@ -127,7 +128,7 @@ abstract class Factory
 
             foreach ($this->rows($overrides) as $row) {
                 $stored = $db->table($this->table)->insertReturning($row);
-                $model = $this->class === null ? $stored : Hydrator::make($this->class, $stored);
+                $model = $this->class === null ? new Row($stored) : Hydrator::make($this->class, $stored);
 
                 foreach ($this->afterCreating as $callback) {
                     $callback($model);

@@ -49,6 +49,44 @@ final class SchemaTest extends TestCase
         $this->assertStringContainsString('CREATE INDEX "posts_user_id_created_at_index" ON "posts" ("user_id", "created_at")', $sql);
     }
 
+    public function test_foreign_keys_get_an_index_on_sqlite_and_postgres(): void
+    {
+        foreach (['sqlite', 'pgsql'] as $driver) {
+            $sql = $this->sqlFor($driver);
+
+            $this->assertStringContainsString('CREATE INDEX "posts_category_id_index" ON "posts" ("category_id")', $sql, $driver);
+            // user_id leads the (user_id, created_at) index already: no second one.
+            $this->assertStringNotContainsString('posts_user_id_index', $sql, $driver);
+        }
+
+        // MySQL indexes foreign key columns itself.
+        $this->assertStringNotContainsString('posts_category_id_index', $this->sqlFor('mysql'));
+
+        $without = (new Schema(Connection::sqlite()))->toSql('lines', function (Table $t) {
+            $t->id();
+            $t->foreignId('quote_id')->constrained()->withoutIndex();
+            $t->foreignId('item_id')->nullable()->constrained()->nullOnDelete();
+        });
+        $this->assertStringNotContainsString('lines_quote_id_index', $without);
+        $this->assertStringContainsString('CREATE INDEX "lines_item_id_index" ON "lines" ("item_id")', $without);
+    }
+
+    public function test_a_foreign_key_added_later_is_indexed_and_down_can_drop_it(): void
+    {
+        $db = Connection::sqlite();
+        $schema = new Schema($db);
+        $schema->create('quotes', fn (Table $t) => $t->id());
+        $schema->create('invoices', fn (Table $t) => $t->id());
+
+        $schema->table('invoices', fn (Table $t) => $t->foreignId('quote_id')->nullable()->constrained()->nullOnDelete());
+        $this->assertSame('invoices_quote_id_index', $db->scalar("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'invoices'"));
+
+        // SQLite refuses to drop an indexed column; the grammar drops the index first.
+        $schema->table('invoices', fn (Table $t) => $t->dropColumn('quote_id'));
+        $this->assertSame([], array_column($db->select("SELECT name FROM pragma_table_info('invoices') WHERE name = 'quote_id'"), 'name'));
+        $this->assertNull($db->scalar("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'invoices'"));
+    }
+
     public function test_mysql_sql(): void
     {
         $sql = $this->sqlFor('mysql');

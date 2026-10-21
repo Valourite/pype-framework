@@ -7,6 +7,7 @@ namespace Pype\Stages;
 use Closure;
 use Pype\Http\Request;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
 
 /**
  * Trims whitespace from every string in the query and body input (nested arrays too), so
@@ -17,6 +18,8 @@ use Pype\Pipeline\Stage;
  */
 final class TrimStrings implements Stage
 {
+    use WithArguments;
+
     /** @param list<string> $except  top-level field names left alone */
     public function __construct(
         private readonly array $except = ['password', 'password_confirmation', 'current_password'],

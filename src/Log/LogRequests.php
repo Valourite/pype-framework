@@ -11,6 +11,7 @@ use Pype\Container\ContainerAware;
 use Pype\Http\Request;
 use Pype\Http\Response;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
 use Pype\Routing\Route;
 
 /**
@@ -19,6 +20,8 @@ use Pype\Routing\Route;
  */
 final class LogRequests implements Stage, ContainerAware
 {
+    use WithArguments;
+
     private ?LoggerInterface $log = null;
 
     /** @param list<string> $except path prefixes not to log (the log viewer itself) */

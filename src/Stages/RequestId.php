@@ -7,7 +7,9 @@ namespace Pype\Stages;
 use Closure;
 use Pype\Http\Request;
 use Pype\Http\Response;
+use Pype\Pipeline\Provides;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
 
 /**
  * Gives every request an id (reusing a sane incoming X-Request-Id), exposes it to later
@@ -16,8 +18,11 @@ use Pype\Pipeline\Stage;
  *   $app->through(new RequestId());
  *   fn (RequestIdValue $id) => ...   // or $request->context()->get(RequestIdValue::class)
  */
+#[Provides(RequestIdValue::class)]
 final class RequestId implements Stage
 {
+    use WithArguments;
+
     public function __construct(
         private readonly string $header = 'X-Request-Id',
         private readonly bool $trustIncoming = true,

@@ -56,7 +56,7 @@ final class FactoryTest extends TestCase
         $this->assertSame(4, $this->db->table('authors')->count());
     }
 
-    public function test_make_does_not_insert_and_arrays_without_a_class(): void
+    public function test_make_does_not_insert_and_rows_without_a_class(): void
     {
         $row = AuthorFactory::new($this->db)->make(['role' => 'admin']);
 
@@ -65,9 +65,13 @@ final class FactoryTest extends TestCase
         $this->assertCount(5, AuthorFactory::new($this->db)->count(5)->make());
         $this->assertSame(0, $this->db->table('authors')->count());
 
+        // Without a $class, create() still returns an object: $book->id, and $book['id'] for old code.
         $book = BookFactory::new($this->db)->create();
-        $this->assertIsArray($book);
+        $this->assertInstanceOf(\Pype\Database\Row::class, $book);
+        $this->assertSame(1, (int) $book->id);
         $this->assertSame(1, (int) $book['id']);
+        $this->assertSame(['id', 'author_id', 'title', 'pages'], array_keys($book->toArray()));
+        $this->assertSame($book->toArray(), json_decode((string) json_encode($book), true));
     }
 
     public function test_states_sequences_lazy_relations_and_after_creating(): void

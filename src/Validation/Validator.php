@@ -24,7 +24,8 @@ use Pype\Http\UploadedFile;
  * Compare:  in:a,b, not_in:a,b, same:field, different:field, confirmed (<field>_confirmation),
  *           before:x, after:x, before_or_equal:x, after_or_equal:x (x = a date or another field)
  * Files:    file, image, mimes:pdf,jpg (the real type, not the browser's claim)
- * Database: unique:table,column[,ignoreId[,idColumn]], exists:table,column (or new Unique/Exists)
+ * Database: unique:table,column[,ignoreId[,idColumn]], exists:table,column, both with optional
+ * col=value scopes ('unique:items,sku,{id},id,company_id={user.company_id}') (or new Unique/Exists)
  * Custom:   a Rule object, or a Closure(mixed $value, string $field, array $data): ?string
  *
  * Nested input with dots: 'address.city'; every item of an array with *: 'tags.*' => 'string|max:20',
@@ -111,13 +112,26 @@ final class Validator
         return [$validated, $errors];
     }
 
-    /** unique:table,column[,ignoreId[,idColumn]] and exists:table,column as Unique / Exists rules. */
+    /**
+     * unique:table,column[,ignoreId[,idColumn[,col=value...]]] and exists:table,column[,col=value...]
+     * as Unique / Exists rules. col=value pairs narrow the check (a scope): unique per company is
+     * 'unique:items,sku,{id},id,company_id={user.company_id}' (Validate fills the placeholders).
+     */
     private static function database(string $field, mixed $value, string $name, string $arg, array $data, ?Connection $db): ?string
     {
         $parts = array_map('trim', explode(',', $arg));
+        $positional = array_values(array_filter($parts, static fn (string $p) => !str_contains($p, '=')));
+        $where = [];
+        foreach ($parts as $part) {
+            if (str_contains($part, '=')) {
+                [$column, $is] = array_map('trim', explode('=', $part, 2));
+                $where[$column] = strtolower($is) === 'null' ? null : $is;
+            }
+        }
+
         $rule = $name === 'unique'
-            ? new Unique($parts[0], $parts[1] ?? null, ($parts[2] ?? '') === '' ? null : $parts[2], $parts[3] ?? 'id')
-            : new Exists($parts[0], $parts[1] ?? null);
+            ? new Unique($positional[0], $positional[1] ?? null, in_array(strtolower($positional[2] ?? ''), ['', 'null'], true) ? null : $positional[2], $positional[3] ?? 'id', $where)
+            : new Exists($positional[0], $positional[1] ?? null, $where);
 
         return is_scalar($value)
             ? $rule->using($db ?? throw new InvalidArgumentException("The {$name} rule needs a database connection."))->check($field, $value, $data)

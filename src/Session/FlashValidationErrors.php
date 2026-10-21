@@ -8,6 +8,7 @@ use Closure;
 use Pype\Http\Request;
 use Pype\Http\Response;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
 
 /**
  * Turns a 422 validation error into "redirect back to the form, with errors and old input",
@@ -17,6 +18,8 @@ use Pype\Pipeline\Stage;
  */
 final class FlashValidationErrors implements Stage
 {
+    use WithArguments;
+
     /** @param list<string> $dontFlash  input never put back into the form */
     public function __construct(
         private readonly string $fallback = '/',

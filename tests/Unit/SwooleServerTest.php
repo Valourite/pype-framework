@@ -208,4 +208,98 @@ final class SwooleServerTest extends TestCase
 
         exec('rm -rf ' . escapeshellarg($dir));
     }
+
+    // ── Static files ─────────────────────────────────────────────────────────
+
+    /** A throwaway app whose public/ holds css/app.css, a PHP file and a dotfile (and a secret outside public/). */
+    private function appWithPublic(): array
+    {
+        $base = sys_get_temp_dir() . '/pype-static-' . bin2hex(random_bytes(4));
+        mkdir("{$base}/public/css", 0777, true);
+        file_put_contents("{$base}/public/css/app.css", 'body { color: red }');
+        file_put_contents("{$base}/public/index.php", '<?php echo "source";');
+        file_put_contents("{$base}/public/.env", 'SECRET=1');
+        file_put_contents("{$base}/secret.css", 'outside');
+        touch("{$base}/public/css/app.css", 1_700_000_000);
+
+        return [$base, new SwooleServer(new Application($base))];
+    }
+
+    private static function cleanup(string $base): void
+    {
+        foreach (['public/css/app.css', 'public/index.php', 'public/.env', 'secret.css'] as $f) {
+            @unlink("{$base}/{$f}");
+        }
+        @rmdir("{$base}/public/css");
+        @rmdir("{$base}/public");
+        @rmdir($base);
+    }
+
+    public function test_static_files_are_served_from_public_without_the_app(): void
+    {
+        [$base, $server] = $this->appWithPublic();
+        $res = self::res();
+
+        $this->assertTrue($server->serveStatic(self::req(['request_method' => 'GET', 'request_uri' => '/css/app.css?v=3']), $res));
+        $this->assertSame(200, $res->status);
+        $this->assertSame('body { color: red }', $res->body);
+        $this->assertSame('text/css; charset=utf-8', $res->headers['Content-Type']);
+        $this->assertSame('Tue, 14 Nov 2023 22:13:20 GMT', $res->headers['Last-Modified']);
+        $this->assertSame('nosniff', $res->headers['X-Content-Type-Options']);
+
+        $head = self::res();
+        $this->assertTrue($server->serveStatic(self::req(['request_method' => 'HEAD', 'request_uri' => '/css/app.css']), $head));
+        $this->assertSame('', $head->body);
+
+        self::cleanup($base);
+    }
+
+    public function test_unchanged_static_files_answer_304(): void
+    {
+        [$base, $server] = $this->appWithPublic();
+        $res = self::res();
+
+        $this->assertTrue($server->serveStatic(self::req(['request_method' => 'GET', 'request_uri' => '/css/app.css'], ['if-modified-since' => 'Tue, 14 Nov 2023 22:13:20 GMT']), $res));
+        $this->assertSame(304, $res->status);
+        $this->assertSame('', $res->body);
+
+        $stale = self::res();
+        $server->serveStatic(self::req(['request_method' => 'GET', 'request_uri' => '/css/app.css'], ['if-modified-since' => 'Mon, 13 Nov 2023 00:00:00 GMT']), $stale);
+        $this->assertSame(200, $stale->status);
+
+        self::cleanup($base);
+    }
+
+    public function test_only_files_inside_public_are_served(): void
+    {
+        [$base, $server] = $this->appWithPublic();
+
+        foreach ([
+            ['GET', '/'], ['GET', '/expenses'], ['GET', '/missing.css'], ['GET', '/css'],     // not files
+            ['GET', '/index.php'], ['GET', '/index.php/'],                                    // source code
+            ['GET', '/.env'], ['GET', '/css/../.env'],                                        // dotfiles
+            ['GET', '/../secret.css'], ['GET', '/%2e%2e/secret.css'], ['GET', '/css/..%2f..%2fsecret.css'],   // outside public/
+            ['POST', '/css/app.css'],                                                         // not a read
+        ] as [$method, $uri]) {
+            $res = self::res();
+            $this->assertFalse($server->serveStatic(self::req(['request_method' => $method, 'request_uri' => $uri]), $res), "{$method} {$uri}");
+            $this->assertNull($res->body, "{$method} {$uri} wrote a body");
+        }
+
+        self::cleanup($base);
+    }
+
+    public function test_from_app_passes_settings_through_and_named_options_win(): void
+    {
+        $app = new Application(__DIR__, ['app' => ['swoole' => [
+            'workers' => 4,
+            'settings' => ['package_max_length' => 8 * 1024 * 1024, 'worker_num' => 2, 'http_compression' => false],
+        ]]]);
+
+        $s = SwooleServer::fromApp($app)->settings();
+        $this->assertSame(8 * 1024 * 1024, $s['package_max_length']);   // any server setting, as is
+        $this->assertFalse($s['http_compression']);
+        $this->assertSame(4, $s['worker_num']);                            // app.swoole.workers wins over settings
+        $this->assertSame(6, SwooleServer::fromApp($app, ['workers' => '6'])->settings()['worker_num']);   // and --workers over both
+    }
 }

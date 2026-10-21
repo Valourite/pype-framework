@@ -11,7 +11,7 @@ use Pype\Http\Response;
  * Sends a string the handler already built as HTML, unchanged. Errors (arrays from
  * Response::error) fall back to a plain text message.
  *
- *   $router->get('/hello', [fn () => '<h1>Hello</h1>', new HtmlOutlet()]);
+ *   $router->get('/hello', [fn () => '<h1>Hello</h1>', HtmlOutlet::class]);
  */
 class HtmlOutlet extends Outlet
 {

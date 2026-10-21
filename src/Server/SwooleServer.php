@@ -24,6 +24,22 @@ use Throwable;
  */
 final class SwooleServer
 {
+    /** Files over this size are left to the app (and so, usually, a 404): public/ holds css, js and images. */
+    private const STATIC_MAX_BYTES = 8 * 1024 * 1024;
+
+    /** @var array<string, string> extension => Content-Type; anything else is application/octet-stream */
+    private const STATIC_TYPES = [
+        'css' => 'text/css; charset=utf-8', 'js' => 'text/javascript; charset=utf-8', 'mjs' => 'text/javascript; charset=utf-8',
+        'json' => 'application/json', 'map' => 'application/json', 'webmanifest' => 'application/manifest+json',
+        'html' => 'text/html; charset=utf-8', 'txt' => 'text/plain; charset=utf-8', 'xml' => 'application/xml',
+        'svg' => 'image/svg+xml', 'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif',
+        'webp' => 'image/webp', 'avif' => 'image/avif', 'ico' => 'image/x-icon', 'pdf' => 'application/pdf',
+        'woff' => 'font/woff', 'woff2' => 'font/woff2', 'ttf' => 'font/ttf', 'otf' => 'font/otf',
+    ];
+
+    /** Set in start(): true when OpenSwoole's own static handler is on, so handle() leaves static files to it. */
+    private bool $nativeStatic = false;
+
     /** @param array<string, mixed> $settings  OpenSwoole server settings, merged over the defaults */
     public function __construct(
         private readonly Application $app,
@@ -31,6 +47,30 @@ final class SwooleServer
         private readonly int $port = 8000,
         private readonly array $settings = [],
     ) {
+    }
+
+    /**
+     * The server `php bin/pype serve` starts: app.swoole.settings (any OpenSwoole/Swoole server
+     * setting, passed through as is), then workers, max_request and static_handler from config, then
+     * the command's --host/--port/--workers.
+     *
+     * @param array<string, string> $options  serve's --name=value options
+     */
+    public static function fromApp(Application $app, array $options = []): self
+    {
+        $workers = $options['workers'] ?? $app->config('app.swoole.workers');
+        $nativeStatic = $app->config('app.swoole.static_handler');
+        $named = array_filter([
+            'worker_num' => $workers === null || $workers === '' ? null : (int) $workers,
+            'max_request' => $app->config('app.swoole.max_request'),
+            // null = pype's default (serve public/ from PHP); true = OpenSwoole's own static handler
+            'enable_static_handler' => $nativeStatic === null || $nativeStatic === '' ? null : filter_var($nativeStatic, FILTER_VALIDATE_BOOLEAN),
+        ], static fn ($v) => $v !== null);
+
+        return new self($app, $options['host'] ?? '0.0.0.0', (int) ($options['port'] ?? 8000), [
+            ...(array) $app->config('app.swoole.settings', []),
+            ...$named,
+        ]);
     }
 
     public static function available(): bool
@@ -47,6 +87,7 @@ final class SwooleServer
         $class = class_exists(\OpenSwoole\Http\Server::class) ? \OpenSwoole\Http\Server::class : \Swoole\Http\Server::class;
         $server = new $class($this->host, $this->port);
         $settings = $this->settings();
+        $this->nativeStatic = (bool) $settings['enable_static_handler'];
         $server->set($settings);
         $this->app->router->warm();   // built once here; every forked worker inherits the tables
 
@@ -78,7 +119,11 @@ final class SwooleServer
             'max_request' => 10000,            // recycle workers now and then, capping any slow leak
             'enable_coroutine' => false,       // one request at a time per worker, like PHP-FPM
             'package_max_length' => 8 * 1024 * 1024,
-            'enable_static_handler' => true,   // css, images, ... straight from public/
+            // Static files (css, images, ...) are served by serveStatic() below. OpenSwoole's own handler
+            // (set 'enable_static_handler' => true, i.e. app.swoole.static_handler) leaves the connection
+            // corked after a file: every later response on it, pages too, waits ~200 ms for the cork to time
+            // out (seen with Swoole 6.2.3 and Chrome: a click took 300-500 ms instead of 2).
+            'enable_static_handler' => false,
             'document_root' => $this->app->path('public'),
             'http_compression' => false,
             ...array_filter($this->settings, static fn ($v) => $v !== null),
@@ -126,6 +171,10 @@ final class SwooleServer
     public function handle(object $req, object $res): void
     {
         try {
+            if (!$this->nativeStatic && $this->serveStatic($req, $res)) {
+                return;
+            }
+
             $request = $this->toRequest($req);
             $this->emit($this->app->handle($request), $request, $res);
             $this->app->terminate($request);   // the response is sent; now deferred work (Mailer::later)
@@ -136,6 +185,60 @@ final class SwooleServer
             $res->status(500);
             $res->end('Server error');
         }
+    }
+
+    /**
+     * Answer a GET/HEAD for a file under public/ (css, js, images, ...) without touching the app.
+     * Returns false when the request isn't for such a file, so the app handles it. Never serves
+     * PHP/executable files or dotfiles, and nothing outside public/. Sends Last-Modified and answers
+     * If-Modified-Since with 304, like the native handler did.
+     */
+    public function serveStatic(object $req, object $res): bool
+    {
+        $server = $req->server ?? [];
+        $method = strtoupper($server['request_method'] ?? 'GET');
+
+        if ($method !== 'GET' && $method !== 'HEAD') {
+            return false;
+        }
+
+        $path = rawurldecode(parse_url($server['request_uri'] ?? '/', PHP_URL_PATH) ?: '/');
+
+        if (str_contains($path, "\0") || str_contains($path, '\\') || preg_match('#(^|/)\.#', $path) === 1) {
+            return false;   // NUL, backslashes, dotfiles and ".." segments
+        }
+
+        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+        if ($extension === '' || preg_match('/^(php\d?|phtml|phar|inc)$/', $extension) === 1) {
+            return false;
+        }
+
+        $root = realpath($this->app->path('public'));
+        $file = $root === false ? false : realpath($root . $path);
+
+        if ($file === false || !str_starts_with($file, $root . DIRECTORY_SEPARATOR) || !is_file($file) || filesize($file) > self::STATIC_MAX_BYTES) {
+            return false;
+        }
+
+        $modified = (int) filemtime($file);
+        $res->header('Content-Type', self::STATIC_TYPES[$extension] ?? 'application/octet-stream');
+        $res->header('Last-Modified', gmdate('D, d M Y H:i:s', $modified) . ' GMT');
+        $res->header('X-Content-Type-Options', 'nosniff');
+
+        $since = strtotime((string) (($req->header ?? [])['if-modified-since'] ?? ''));
+
+        if ($since !== false && $since >= $modified) {
+            $res->status(304);
+            $res->end('');
+
+            return true;
+        }
+
+        $res->status(200);
+        $res->end($method === 'HEAD' ? '' : (string) file_get_contents($file));
+
+        return true;
     }
 
     /** OpenSwoole request → pype Request. */

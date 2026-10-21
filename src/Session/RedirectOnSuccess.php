@@ -8,12 +8,15 @@ use Closure;
 use Pype\Http\Request;
 use Pype\Http\Response;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
+use Pype\Routing\Urls;
 
 /**
  * Lets a browser form reuse an API handler: when the rest of the pipeline succeeds, answer
  * with a redirect (and optionally a flashed status message) instead of the data.
  *
  *   $router->post('/posts', ['web', new Validate([...]), new RedirectOnSuccess('/posts', 'Post created.'), CreatePost::class]);
+ *   new RedirectOnSuccess('posts.show')        // a route name: {id} comes from the matched route
  *   new RedirectOnSuccess(fn (Response $r) => '/posts/' . $r->data()->id)
  *
  * Errors pass through untouched ('web' sends validation errors back to the form), and JSON
@@ -21,8 +24,11 @@ use Pype\Pipeline\Stage;
  */
 final class RedirectOnSuccess implements Stage
 {
+    use WithArguments;
+
     /**
-     * @param string|Closure(Response, Request): string $to
+     * @param string|Closure(Response, Request): string $to  a path, a route name (its {placeholders} filled
+     *                                                         from the matched route's params), or a closure returning a path
      * @param string|null $status  flashed as 'status'; read it in templates with $this->session()->get('status')
      */
     public function __construct(
@@ -43,6 +49,8 @@ final class RedirectOnSuccess implements Stage
             $request->context()->find(Session::class)?->flash('status', $this->status);
         }
 
-        return Response::redirect(is_string($this->to) ? $this->to : ($this->to)($response, $request), 303);
+        $to = is_string($this->to) ? Urls::current()->target($this->to, routeParams: $request->params()) : ($this->to)($response, $request);
+
+        return Response::redirect($to, 303);
     }
 }

@@ -7,9 +7,12 @@ namespace Pype\View;
 use Closure;
 use Psr\Container\ContainerInterface;
 use Pype\Container\ContainerAware;
+use Pype\Database\Page;
+use Pype\Database\SimplePage;
 use Pype\Http\Request;
 use Pype\Http\Response;
 use Pype\Outlet\Outlet;
+use Pype\Pipeline\WithArguments;
 
 /**
  * An outlet that renders an HTML template. Extend it for class-based views:
@@ -30,11 +33,14 @@ use Pype\Outlet\Outlet;
  *
  *   $router->get('/users/{id}', [FindUser::class, ShowUser::class, UserProfile::class]);
  *
- * Templates receive the variables from data(), plus $view (this object), $meta and $request.
+ * Templates receive the variables from data(), plus $view (this object), $meta and $request, and
+ * $page when the route returned a Page or SimplePage (for $page->links()).
  * Errors render errors/{status}.php if present, else errorTemplate(), else plain text.
  */
 abstract class ViewOutlet extends Outlet implements ContainerAware
 {
+    use WithArguments;
+
     private ?Views $views = null;
 
     /** Template name relative to the views directory, e.g. 'users/profile'. */
@@ -83,7 +89,10 @@ abstract class ViewOutlet extends Outlet implements ContainerAware
             return $this->renderError($views, $response, $request);
         }
 
+        $source = $response->source();
+
         return $views->render($this->template(), [
+            ...($source instanceof Page || $source instanceof SimplePage ? ['page' => $source] : []),
             ...$this->data($response->data(), $request),
             'view' => $this,
             'meta' => $response->meta(),

@@ -72,6 +72,33 @@ final class Urls
     }
 
     /**
+     * Where a redirect goes: a path or full URL ('/posts', 'https://...') as it is, anything
+     * else is a route name. $routeParams (usually the matched route's) fill the target's
+     * {placeholders} that $params doesn't give, and are otherwise ignored, so
+     * target('quotes.show', routeParams: ['id' => 5]) is /quotes/5 without ?id=5 on other routes.
+     *
+     * @param array<string, scalar|Stringable|array|null> $params
+     * @param array<string, string> $routeParams
+     */
+    public function target(string $to, array $params = [], array $routeParams = []): string
+    {
+        if (str_starts_with($to, '/') || str_contains($to, '://')) {
+            return $params === [] ? $to : $to . (str_contains($to, '?') ? '&' : '?') . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+        }
+
+        $route = $this->router->named($to) ?? throw new InvalidArgumentException("No route is named [{$to}].");
+        preg_match_all('#\{(\w+)\}#', $route->path(), $placeholders);
+
+        foreach ($placeholders[1] as $name) {
+            if (!array_key_exists($name, $params) && array_key_exists($name, $routeParams)) {
+                $params[$name] = $routeParams[$name];
+            }
+        }
+
+        return $this->to($to, $params);
+    }
+
+    /**
      * A link nobody can change or reuse after $expiresIn seconds (null = never expires). Guard
      * the route with the ValidateSignature stage. Absolute by default: signed links are usually
      * sent by email.

@@ -8,6 +8,7 @@ use Closure;
 use Pype\Http\Request;
 use Pype\Http\Response;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
 
 /**
  * CORS headers + preflight handling. Register as a *global* stage so OPTIONS
@@ -17,6 +18,8 @@ use Pype\Pipeline\Stage;
  */
 final class Cors implements Stage
 {
+    use WithArguments;
+
     /**
      * @param list<string> $origins  exact origins, or ['*']
      * @param list<string> $methods

@@ -1,0 +1,1 @@
+<input type="hidden" name="_token" value="<?= e($csrf) ?>">row1=<?= e($old('lines.1.quantity', 'blank')) ?>|row2=<?= e($old('lines.2.quantity')) ?>|err1=<?= e($error('lines.1.quantity') ?? '-') ?>|err2=<?= e($error('lines.2.quantity') ?? '-') ?>

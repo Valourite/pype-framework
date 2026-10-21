@@ -7,7 +7,9 @@ namespace Pype\Session;
 use Closure;
 use Pype\Exceptions\HttpException;
 use Pype\Http\Request;
+use Pype\Pipeline\Requires;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
 
 /**
  * Rejects state-changing requests (POST, PUT, PATCH, DELETE) unless they carry the session's
@@ -17,8 +19,11 @@ use Pype\Pipeline\Stage;
  *
  *   new VerifyCsrfToken(except: ['/webhooks/*'])
  */
+#[Requires(Session::class)]
 final class VerifyCsrfToken implements Stage
 {
+    use WithArguments;
+
     /** @param list<string> $except  paths to skip; * matches anything */
     public function __construct(private readonly array $except = [])
     {

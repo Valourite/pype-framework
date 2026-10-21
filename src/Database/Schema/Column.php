@@ -19,6 +19,9 @@ final class Column
     /** Foreign key: [table, column, on delete action] */
     public ?array $references = null;
 
+    /** Index a foreign key column (SQLite and Postgres don't do it themselves; MySQL does). */
+    public bool $indexForeignKey = true;
+
     /** @param array<string, int> $args  length, precision, scale */
     public function __construct(
         public readonly string $name,
@@ -84,6 +87,17 @@ final class Column
     public function constrained(?string $table = null, string $column = 'id'): self
     {
         $this->references = [$table ?? $this->guessTable(), $column, null];
+
+        return $this;
+    }
+
+    /**
+     * Don't add the index constrained() adds on SQLite and Postgres: for a column already
+     * covered by a composite index that starts with it, or one you never look rows up by.
+     */
+    public function withoutIndex(): self
+    {
+        $this->indexForeignKey = false;
 
         return $this;
     }

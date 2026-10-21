@@ -23,8 +23,9 @@ final class SessionProvider implements Provider
             default => $c->get($app->config('session.driver')),   // a class name of your own store
         });
 
+        // Specs, not instances: built only on routes that use 'web', fresh for each request.
         $app->stack('web', [
-            new StartSession(
+            StartSession::with(
                 cookie: $app->config('session.cookie', 'pype_session'),
                 lifetimeMinutes: (int) $app->config('session.lifetime', 120),
                 secure: (bool) $app->config('session.secure', false),
@@ -32,8 +33,8 @@ final class SessionProvider implements Provider
                 domain: $app->config('session.domain'),
                 touchSeconds: (int) $app->config('session.touch', 60),
             ),
-            new VerifyCsrfToken(except: $app->config('session.csrf_except', [])),
-            new FlashValidationErrors(),
+            VerifyCsrfToken::with(except: $app->config('session.csrf_except', [])),
+            FlashValidationErrors::class,
         ]);
     }
 }

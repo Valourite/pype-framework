@@ -18,6 +18,7 @@ use Pype\Http\Response;
 use Pype\Outlet\JsonOutlet;
 use Pype\Outlet\Outlet;
 use Pype\Pipeline\Pipeline;
+use Pype\Routing\RouteCheck;
 use Pype\Routing\Router;
 use Pype\Routing\Urls;
 use Pype\Security\Encrypter;
@@ -36,6 +37,9 @@ final class Application
 {
     /** Where `bin/pype optimize` writes the compiled route tables. */
     public const ROUTE_CACHE = 'bootstrap/cache/routes.php';
+
+    /** The scheduled tasks (read by the schedule commands; routesIn() leaves it alone). */
+    public const SCHEDULE = 'routes/schedule.php';
 
     public readonly Container $container;
     public readonly Router $router;
@@ -136,6 +140,24 @@ final class Application
         return $this;
     }
 
+    /** @return list<string|object> the stages that wrap every route, in order */
+    public function globalStages(): array
+    {
+        return $this->globalStages;
+    }
+
+    /**
+     * Problems with the order of stages in every route (see Routing\RouteCheck): empty when each
+     * stage that #[Requires] something comes after one that #[Provides] it. Use it in a test:
+     *   $this->assertSame([], $app->checkRoutes());
+     *
+     * @return list<string>
+     */
+    public function checkRoutes(): array
+    {
+        return (new RouteCheck($this))->problems();
+    }
+
     /** Name a reusable sequence of stages; use the name in any stage list. */
     public function stack(string $name, array $stages): self
     {
@@ -212,6 +234,68 @@ final class Application
         })($this->router, $this, $file);
 
         return $this;
+    }
+
+    /**
+     * Load every routes file under $dir, subfolders included, so a new file needs no line here:
+     *
+     *   routes/web.php            loaded as it is
+     *   routes/api.php            under /api, route names prefixed with api.
+     *   routes/quotes/web.php     loaded as it is
+     *   routes/quotes/api.php     under /api, names prefixed with api. (api.quotes.index)
+     *   routes/_helpers.php       skipped: files and folders starting with _ are never loaded
+     *
+     * Only the file name api.php is special; any other name loads as it is, and its own groups
+     * decide the prefix and stages. Files load in alphabetical order, folder by folder, so the
+     * order (which decides between overlapping patterns) is the same on every machine. The
+     * schedule file (app.schedule, routes/schedule.php by default) is skipped. Two routes with
+     * the same name throw here rather than on the first url() call.
+     */
+    public function routesIn(string $dir): self
+    {
+        if (!is_dir($dir)) {
+            throw new \InvalidArgumentException("No routes folder at [{$dir}].");
+        }
+
+        $schedule = realpath($this->path((string) $this->config('app.schedule', self::SCHEDULE)));
+
+        foreach (self::routeFiles($dir) as $file) {
+            if (realpath($file) === $schedule) {
+                continue;
+            }
+
+            if (basename($file) === 'api.php') {
+                $this->router->group('/api', [], fn () => $this->routes($file), name: 'api.');
+            } else {
+                $this->routes($file);
+            }
+        }
+
+        $this->router->names();
+
+        return $this;
+    }
+
+    /** @return list<string> .php files under $dir in load order, without _ files and folders */
+    private static function routeFiles(string $dir): array
+    {
+        $files = [];
+
+        foreach (scandir($dir) ?: [] as $entry) {
+            if ($entry[0] === '.' || $entry[0] === '_') {
+                continue;
+            }
+
+            $path = $dir . '/' . $entry;
+
+            if (is_dir($path)) {
+                array_push($files, ...self::routeFiles($path));
+            } elseif (str_ends_with($entry, '.php')) {
+                $files[] = $path;
+            }
+        }
+
+        return $files;
     }
 
     public function handle(Request $request): Response

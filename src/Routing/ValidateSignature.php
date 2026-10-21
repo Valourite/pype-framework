@@ -10,6 +10,7 @@ use Pype\Container\ContainerAware;
 use Pype\Exceptions\HttpException;
 use Pype\Http\Request;
 use Pype\Pipeline\Stage;
+use Pype\Pipeline\WithArguments;
 
 /**
  * Lets a request through only if it came from an untouched, unexpired signed_url().
@@ -20,6 +21,8 @@ use Pype\Pipeline\Stage;
  */
 final class ValidateSignature implements Stage, ContainerAware
 {
+    use WithArguments;
+
     private ?Urls $urls = null;
 
     public function __construct(private readonly string $message = 'This link is invalid or has expired.')
