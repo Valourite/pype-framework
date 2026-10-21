@@ -6,24 +6,28 @@ The starter app is `pype/pype` (github.com/Valourite/pype-skeleton); apps are cr
 `composer create-project pype/pype`.
 
 `docs/GUIDE.md` is the app developer's guide (every built-in with examples; apps read it from
-`vendor/`, and their CLAUDE.md points there): **update it whenever a feature changes**.
+`vendor/`, and their AGENTS.md (imported by CLAUDE.md) points there): **update it whenever a feature
+changes**. The app's AGENTS.md is copied once at `create-project` and never updated, so keep detail in
+the guide and only stable rules there.
 Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` for what's planned,
 `docs/BENCHMARKS.md` for performance numbers and how to measure.
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.8.1 (docs: `docs/GUIDE.md`), 0.8.0 (framework + skeleton on Packagist): factories + seeders, and the
+- **Released:** 0.9.0 (2026-10-21): the work list from the expenses app (ROADMAP "Decided with the
+  owner": routesIn, stage()/::with(), Requires/Provides + routes:check, pagination links, redirects,
+  template locals, page outlets, Latte/Blade by extension, dev mailbox, test helpers, Chain, resource
+  routes, per-user throttle and scoped unique, Validate::prepare, FK indexes, install command); skeleton
+  has AGENTS.md. Still open: roles, the static-handler check on real OpenSwoole.
+  0.8.1 (docs: `docs/GUIDE.md`), 0.8.0 (framework + skeleton on Packagist): factories + seeders, and the
   $12-server bench round (query builder memo, container-aware 1x workers, JWT, configurable
   errors, TrimStrings, insertReturning, URL-decoded params). 0.7.0: migration rollback + the
   Postgres insert fix. 0.6.0: queue + scheduler. 0.5.0: validation rules, mail, password
   reset/verification, encryption, remember me, cache.
-- **Next (owner's request, 2026-10-20, for a new session):** extend the expenses app: more users
-  and expenses, adding users (admin), an item catalogue, quotes and invoices, using the new
-  built-ins. Plan it in plan mode first; decisions needed: roles, PDFs, one company or several,
-  VAT. Framework gaps that round will hit are in ROADMAP "Gaps found by the docs test".
-  Route caching stays a parked idea there.
-- **Example app:** `../expenses` (local git repo only, never give it a remote). Its bench is in
-  `bench/` (see `docs/BENCHMARKS.md`).
+- **Next:** the owner will have a fresh AI build the same app (a helpdesk) in Laravel and in pype, to
+  compare. Open framework items: roles (parked), the OpenSwoole static-handler check.
+- **Example app:** `../expenses` is an old test bed (local git only, never give it a remote); it is not
+  kept up to date with the framework. Its bench is in `bench/` (see `docs/BENCHMARKS.md`).
 
 ## How the owner works
 

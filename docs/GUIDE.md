@@ -4,6 +4,15 @@ How to build an app with pype: every built-in, with examples. Apps have this fil
 `vendor/pype/framework/docs/GUIDE.md`. The examples follow the starter app (`pype/pype`), so they
 mention its files (`routes/web.php`, `config/auth.php`, `UserFactory`, ...).
 
+**How pype thinks.** A request goes through a pipeline: an ordered list of small classes, each doing
+one thing, that hand typed objects to each other through the request context. Order is explicit, so
+reading a route tells you everything that happens to the request; a stage that runs before what it
+needs fails loudly (and `routes:check` finds it without a request). Everything is a class, so every
+step can be tested alone. The code is plain PHP: no magic methods, no facades, no ORM, no template
+language you must learn, and nothing loads or costs anything until a route uses it. pype runs the same
+under PHP-FPM and long-running Swoole workers, which is why per-request data lives on the request and
+never in a static or a service. The app's `AGENTS.md` has the rules in short; this guide has the detail.
+
 ## A route
 
 ```php
