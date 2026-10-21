@@ -51,7 +51,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 6. **Worker-safe.** Apps may run under OpenSwoole, where one `Application` serves many
    requests. Per-request state lives on the `Request` (and its `Context`), never in services,
    singletons or statics. `tests/Unit/WorkerSafetyTest.php` guards this.
-7. Stages are configured **objects** (`new Throttle(5, 60)`), never `'name:arg'` strings.
+7. Stages are configured **objects** (`Throttle::with(5, 60)`, or `new Throttle(5, 60)`), never `'name:arg'` strings.
 8. Ask the owner before adding heavy features or new concepts. Don't commit or push unless asked.
 
 ## Layout

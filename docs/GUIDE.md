@@ -20,6 +20,117 @@ Swap the **outlet** — the stage where the flow leaves the pipeline — and the
 $router->get('/users/{id}/profile', [FindUser::class, ShowUser::class, UserProfile::class]);
 ```
 
+## Building a feature, start to finish
+
+A route is a **pipeline**: a list of small classes that run in order and hand typed objects to each
+other through the request context. Route files stay short and list only classes; each class does one
+thing and can be tested on its own (see Testing). The usual shape:
+
+```
+[guard] → [validate] → [load what it needs] → [do the work] → [outlet]
+ 'web',    ValidateX    LoadX (404 if not      CreateX         XView (page) / RedirectOutlet /
+ Authenticate           yours), puts X in      (handler)       the default JSON outlet
+                        the context
+```
+
+Quotes, as an example (`php bin/pype make:routes quotes`, `make:stage`, `make:view`):
+
+```php
+// routes/quotes/web.php
+$router->group('/quotes', ['web', Authenticate::with(redirectTo: '/login')], function (Router $router) {
+    $router->get('/', [LoadQuotes::class, QuotesView::class])->name('index');
+    $router->get('/new', [QuoteFormView::class])->name('create');
+    // The handler returns the new Quote; the outlet sends browsers to its page (JSON clients get the quote).
+    // `new` here because the outlet takes a closure, which ::with() can't carry.
+    $router->post('/', [ValidateQuote::class, CreateQuote::class, new RedirectOutlet('quotes.show', fn (Quote $quote) => ['id' => $quote->id], flash: 'Quote created.')])->name('store');
+
+    $router->group('/{id}', [LoadQuote::class], function (Router $router) {
+        $router->get('/', [QuoteView::class])->name('show');
+        $router->get('/edit', [QuoteFormView::class])->name('edit');
+        $router->patch('/', [ValidateQuote::class, UpdateQuote::class, RedirectOutlet::with('quotes.show', flash: 'Saved.')])->name('update');
+        $router->delete('/', [DeleteQuote::class, RedirectOutlet::with('quotes.index', flash: 'Deleted.')])->name('destroy');
+    });
+}, name: 'quotes.');
+
+// routes/quotes/api.php: the same stages, JSON out (served under /api/quotes)
+$router->group('/quotes', ['auth'], function (Router $router) {
+    $router->get('/{id}', [LoadQuote::class, fn (Quote $quote) => $quote])->name('show');
+    $router->post('/', [ValidateQuote::class, CreateQuote::class])->name('store');
+}, name: 'quotes.');
+```
+
+```php
+#[Requires(User::class)]
+#[Provides(Quote::class)]
+final class LoadQuote implements Stage                     // app/Stages: load + ownership
+{
+    public function __construct(private Connection $db) {}
+
+    public function handle(Request $request, Closure $next): mixed
+    {
+        $user = $request->context()->get(User::class);
+        $quote = $this->db->table('quotes')->where('id', (int) $request->param('id'))
+            ->where('company_id', $user->company_id)->as(Quote::class)->first()
+            ?? throw HttpException::notFound();            // someone else's: 404, so ids don't leak
+
+        $request->context()->put($quote);
+
+        return $next($request);
+    }
+}
+
+final class ValidateQuote extends Validate                 // app/Stages: rules (+ prepare() for rows)
+{
+    protected function rules(): array
+    {
+        return ['customer_id' => 'required|int|exists:customers,id,company_id={user.company_id}', 'notes' => 'nullable|string|max:2000'];
+    }
+}
+
+final class CreateQuote                                    // app/Handlers: the work; returns the result
+{
+    public function __invoke(ValidatedInput $input, User $user, Connection $db): Quote
+    {
+        $id = $db->table('quotes')->insert([...$input->all(), 'company_id' => $user->company_id]);
+
+        return $db->table('quotes')->where('id', $id)->as(Quote::class)->first();
+    }
+}
+
+#[Requires(Quote::class)]
+final class QuoteView extends ViewOutlet                   // app/Views: what the template gets
+{
+    protected function template(): string { return 'quotes/show'; }
+
+    protected function data(mixed $data, Request $request): array
+    {
+        return ['quote' => $request->context()->get(Quote::class)];
+    }
+}
+```
+
+A handler that must decide where to go (or a stage that stops early) returns
+`redirect('route.name', [...], flash: '...')` instead. `php bin/pype routes:check` confirms every stage comes after what it needs; `Chain` tests a stage alone,
+`TestClient` the whole route.
+
+**Don't** (each of these was tried in a real app and replaced by the shape above):
+
+- **A generic "context view" or a named bag of view data.** One page outlet per page reads typed
+  objects from the context; its `data()` is the list of what the template gets.
+- **Stages that only exist to feed a template variable** (`LoadQuotesPageForTheView`). Load the real thing
+  (`Quote`, a `Page` of quotes) and let the page outlet pick from it.
+- **`ContainerAware` in your own stages.** Ask for services in the constructor; give arguments with
+  `X::with(...)`.
+- **Logic in route closures.** A short `fn (Quote $quote) => $quote` to end a JSON route is fine; anything
+  that decides, writes or calls a service is a class.
+- **A repository class per table by default.** Stages and handlers query with `$db->table()`. Put logic
+  several handlers share (numbering inside a transaction, totals) in a plain service class.
+- **403 for another user's record**, or checking ownership inside the handler. A `Load` stage gives 404.
+- **Your own throttle, per-user unique check, redirect-with-message, pagination links or form token
+  scraping in tests.** They're built in: `Throttle::with(..., by:, key:)`, `unique:...,{user.prop}`,
+  `redirect()` / `RedirectOutlet`, `paginate(25, $request)` + `$page->links()`, `submit()` / `actingAs()`.
+- **Per-request data in a service, singleton or static.** It goes in the request context.
+
 ## Concepts
 
 | Concept    | What it is                                                                                         |
@@ -114,11 +225,11 @@ $ php bin/pype routes:check
 
 | Stage / service                     | Use                                                                     |
 |-------------------------------------|-------------------------------------------------------------------------|
-| `'auth'` / `new Authenticate(...)`  | require a user, found by guards (session, bearer token, or your own)    |
+| `'auth'` / `Authenticate::with(...)`  | require a user, found by guards (session, bearer token, or your own)    |
 | `'web'`                             | session cookie + CSRF check + validation errors back to the form         |
 | `Pype\Auth\Auth`                    | `createUser`, `attempt`, `issueToken`, `revoke`, `revokeAll`            |
-| `new Throttle(5, 60)`               | rate limit **per IP + route** (429 + `Retry-After`); counters in the database or APCu (`RATE_LIMIT_DRIVER`). Per user: see Roles, ownership and per-user limits |
-| `new Validate([...rules])`          | 422 on bad input; `ValidatedInput` injected on success (see Validation) |
+| `Throttle::with(5, 60)`               | rate limit **per IP + route** (429 + `Retry-After`); counters in the database or APCu (`RATE_LIMIT_DRIVER`). Per user: see Roles, ownership and per-user limits |
+| `Validate::with([...rules])`          | 422 on bad input; `ValidatedInput` injected on success (see Validation) |
 | `Pype\Cache\Cache`                 | `remember`, locks, background refresh, groups; file, APCu or database (see Cache) |
 | `Pype\Queue\Queue`                 | background jobs: `push`, `later`, retries, `queue:work` (see Queue); `routes/schedule.php` for cron tasks |
 | `new TrimStrings()` (global)        | trims string input before validation (passwords left alone)             |
@@ -126,7 +237,7 @@ $ php bin/pype routes:check
 | `new Cors([...origins])`            | CORS headers + preflight                                                |
 | `new JsonBody(maxBytes: ...)`       | 413 on big bodies, 400 on malformed JSON                                |
 | `new MethodOverride()` (global)     | forms send PUT/PATCH/DELETE via a hidden `_method` field                |
-| `new RedirectOnSuccess($to, $msg)`  | reuse an API handler from a form: redirect + flash on success; `$to` is a path or a route name |
+| `RedirectOnSuccess::with($to, $msg)`  | reuse an API handler from a form: redirect + flash on success; `$to` is a path or a route name |
 | `new RedirectOutlet('route', ...)`  | end a route with a redirect on success, the way `View` ends one with a page (see Redirects) |
 | `redirect('route', flash: '...')`   | return from any stage to stop there and redirect (see Redirects)       |
 
@@ -138,7 +249,8 @@ The same users and stages serve both. Only the first and last stages differ.
   token on every form post, and sends a failed form back to itself with errors and old input.
   `/login`, `/register`, `/account`, `POST /logout`.
 - **`routes/api.php`**: JSON for apps and scripts, authenticated with bearer tokens.
-  `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /me`.
+  Served under `/api` (the file is named `api.php`): `POST /api/auth/register`, `POST /api/auth/login`,
+  `POST /api/auth/logout`, `GET /api/me`.
 
 Auth isn't tied to either. `Authenticate` asks a list of *guards* who the user is (from
 `config/auth.php`: session, then bearer token). How a user proves who they are is your
@@ -146,9 +258,9 @@ handler's job; `SessionGuard::login()` just remembers the result. For anything e
 a header from your proxy), implement `Pype\Auth\Guard`:
 
 ```php
-$router->get('/account', ['web', new Authenticate(redirectTo: '/login'), ...]);    // browsers
+$router->get('/account', ['web', Authenticate::with(redirectTo: '/login'), ...]);    // browsers
 $router->get('/me', ['auth', fn (User $user) => $user]);                             // tokens
-$router->post('/hooks', [new Authenticate(guards: [ApiKeyGuard::class]), ...]);      // your own
+$router->post('/hooks', [Authenticate::with(guards: [ApiKeyGuard::class]), ...]);      // your own
 ```
 
 Forms in templates:
@@ -257,7 +369,7 @@ if ($quote === null) {
 
 ### API tokens or JWTs?
 
-The bearer tokens `/auth/login` hands out are **API tokens**: random strings whose hash is stored
+The bearer tokens `/api/auth/login` hands out are **API tokens**: random strings whose hash is stored
 in `api_tokens`. Each request costs one indexed lookup, and they can be revoked at once (logout,
 "sign out everywhere", a stolen token). Keep them for your own clients (SPA, mobile app, CLI).
 
@@ -288,7 +400,7 @@ the form with errors); good input arrives as `ValidatedInput`:
 
 ```php
 $router->post('/register', [
-    new Validate([
+    Validate::with([
         'name' => 'required|string|max:100',
         'email' => 'required|email|unique:users',
         'password' => 'required|string|min:8|confirmed',
@@ -450,7 +562,7 @@ $router->group('/quotes/{id}', ['auth', LoadQuote::class], fn (Router $r) => $r-
 ```
 
 **Admins:** a column (`users.role` or `is_admin`), a stage that checks it after `Authenticate`,
-and a named stack: `$app->stack('admin', ['web', new Authenticate(redirectTo: '/login'), EnsureAdmin::class])`.
+and a named stack: `$app->stack('admin', ['web', Authenticate::with(redirectTo: '/login'), EnsureAdmin::class])`.
 
 **Per-user rate limits:** `Throttle` counts per IP and route by default. `by:` counts per signed-in
 user instead (all their devices together; guests fall back to their IP), and `key:` lets several
@@ -647,7 +759,7 @@ production shows a plain error.
 
 **Your API's error wording:** pype's own errors (no route, malformed JSON, failed validation,
 unauthenticated, a 500...) can be reworded in `config/app.php` `errors` without touching the
-JSON shape, and `new Validate($rules, status: 400)` changes a validation failure's status
+JSON shape, and `Validate::with($rules, status: 400)` changes a validation failure's status
 (422 by default).
 
 ## Links
@@ -655,7 +767,7 @@ JSON shape, and `new Validate($rules, status: 400)` changes a validation failure
 Name the routes you link to, then build links with `url()` instead of writing paths by hand:
 
 ```php
-$router->get('/expenses/{id}/edit', [LoadExpense::class, new View('expenses/form')])->name('expenses.edit');
+$router->get('/expenses/{id}/edit', [LoadExpense::class, View::with('expenses/form')])->name('expenses.edit');
 
 $router->group('/admin', ['auth'], function (Router $r) {
     $r->get('/users', ListUsers::class)->name('users');           // named admin.users
@@ -956,7 +1068,7 @@ and the closest one wins: **route → group → global → app default**.
 
 ```php
 $app->outlet(MyJson::class);                                      // app default (JsonOutlet otherwise)
-$router->group('/admin', ['auth', new View('admin/page')], ...);  // every route in the group
+$router->group('/admin', ['auth', View::with('admin/page')], ...);  // every route in the group
 $router->get('/report.csv', [LoadReport::class, CsvOutlet::class]); // one route
 ```
 
