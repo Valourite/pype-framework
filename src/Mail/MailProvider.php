@@ -11,7 +11,6 @@ use Pype\Outlet\HtmlOutlet;
 use Pype\Provider;
 use Pype\Queue\Queue;
 use Pype\Routing\Router;
-use Pype\Routing\Urls;
 use Pype\View\Views;
 use Throwable;
 
@@ -56,7 +55,7 @@ final class MailProvider implements Provider
             $container->singleton(MailboxViewer::class, fn ($c) => new MailboxViewer($c->get(Mailbox::class), $driver));
 
             $app->router->group(rtrim((string) $app->config('mail.mailbox.path', '/_pype/mail'), '/'), $stages, function (Router $r) {
-                $r->get('/', [fn (MailboxViewer $v, Request $q, Urls $u) => $v->page($q, $u), HtmlOutlet::class])->name('mail');
+                $r->get('/', [MailboxViewer::class, HtmlOutlet::class])->name('mail');
             }, name: 'pype.');
         }
 

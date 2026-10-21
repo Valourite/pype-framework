@@ -25,7 +25,9 @@ use Pype\Session\Session;
  *   ['web', new Authenticate(redirectTo: '/login'), ...]        // browsers go to the login page
  *   [new Authenticate(optional: true), Feed::class]             // guests allowed; user injected if present
  */
-#[Provides(Auth::USER)]
+// The user, plus what the guard that recognised them leaves: the API token (TokenGuard) or the JWT's
+// claims (JwtGuard). Trusted as declared: a route signed in by session has no token.
+#[Provides(Auth::USER, AccessToken::class, JwtClaims::class)]
 final class Authenticate implements Stage, ContainerAware
 {
     use WithArguments;

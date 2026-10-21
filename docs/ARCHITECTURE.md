@@ -10,7 +10,7 @@ public/index.php
 Application::handle($request)
   1. bind Request in the container
   2. global pipeline:   [outlets…, global stages…]  →  dispatch()
-  3. dispatch():        Router::resolve(method, path) → route pipeline [outlets…, stages…, handler]
+  3. dispatch():        Router::resolve(method, path) → route pipeline [outlets…, stages…]
   4. no outlet claimed the response → app default outlet (JsonOutlet unless changed)
   5. render the response now (a failing template becomes a reported 500)
   6. forget the Request (long-running servers)
@@ -27,8 +27,8 @@ A stage is anything the `Invoker` can call with `(Request $request, Closure $nex
 
 - a class implementing `Pipeline\Stage` (`handle(Request $request, Closure $next): mixed`);
 - a class name (resolved from the container each time);
-- a closure or invokable with any parameters (the handler at the end of a route is just a stage
-  that doesn't call `$next`).
+- a closure or invokable with any parameters (accepted, but apps are built from Stage classes: the
+  stage that does a route's work simply returns instead of calling `$next`).
 
 A stage either calls `$next($request)` to continue, or returns something to short-circuit. What
 it returns becomes a `Response` via `Response::from()`: arrays/objects → data for the outlet,
@@ -235,7 +235,7 @@ routes by name: `['web', ...]`. Built in:
 
 Transport-agnostic. `Authenticate` asks each `Guard` (`authenticate(Request): ?object`) in turn;
 built in are `SessionGuard` (cookie session, only inside `'web'` so always CSRF-checked) and
-`TokenGuard` (`Authorization: Bearer`). How a user logs in is the app's handler:
+`TokenGuard` (`Authorization: Bearer`). How a user logs in is the app's own stage:
 `Auth::attempt()` checks a password, `SessionGuard::login()` remembers the user,
 `Auth::issueToken()` makes an API token.
 

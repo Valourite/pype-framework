@@ -14,7 +14,9 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.9.0 (2026-10-21): the work list from the expenses app (ROADMAP "Decided with the
+- **Released:** 0.9.1 (2026-10-21): `JsonOutlet::data()` (JSON outlets read the context, like page outlets),
+  pype's dev pages use stages, docs drop "handlers" (every step is a stage); skeleton has no app/Handlers.
+  0.9.0 (2026-10-21): the work list from the expenses app (ROADMAP "Decided with the
   owner": routesIn, stage()/::with(), Requires/Provides + routes:check, pagination links, redirects,
   template locals, page outlets, Latte/Blade by extension, dev mailbox, test helpers, Chain, resource
   routes, per-user throttle and scoped unique, Validate::prepare, FK indexes, install command); skeleton

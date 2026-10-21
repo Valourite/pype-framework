@@ -16,18 +16,23 @@ never in a static or a service. The app's `AGENTS.md` has the rules in short; th
 ## A route
 
 ```php
-$router->get('/users/{id}', ['auth', FindUser::class, ShowUser::class]);
+$router->get('/users/{id}', ['auth', FindUser::class, UserJson::class]);
 ```
 
-- `'auth'` — a named stack (here: the built-in bearer-token check)
+- `'auth'` — a named stack (here: the built-in bearer-token check, which puts the user in the context)
 - `FindUser` — a **stage**: `handle(Request $request, Closure $next)`; loads the user into the context
-- `ShowUser` — an invokable class: `__invoke(User $user)`, parameters injected by type
+  and calls `$next`. A stage that ends the route returns the result instead of calling `$next`.
+- `UserJson` — the **outlet**, the stage where the flow leaves the pipeline: it decides what goes out
+  (a `JsonOutlet` subclass reading the context)
 
-Swap the **outlet** — the stage where the flow leaves the pipeline — and the same stages render HTML:
+Swap the outlet and the same stages render HTML:
 
 ```php
-$router->get('/users/{id}/profile', [FindUser::class, ShowUser::class, UserProfile::class]);
+$router->get('/users/{id}/profile', [FindUser::class, UserProfile::class]);
 ```
+
+Everything in a route is a stage. Closures and invokable classes are accepted too (their parameters
+are injected by type), but pype apps are built from `Stage` classes.
 
 ## Building a feature, start to finish
 
@@ -38,8 +43,8 @@ thing and can be tested on its own (see Testing). The usual shape:
 ```
 [guard] → [validate] → [load what it needs] → [do the work] → [outlet]
  'web',    ValidateX    LoadX (404 if not      CreateX         XView (page) / RedirectOutlet /
- Authenticate           yours), puts X in      (handler)       the default JSON outlet
-                        the context
+ Authenticate           yours), puts X in      (returns the    the default JSON outlet
+                        the context            result)
 ```
 
 Quotes, as an example (`php bin/pype make:routes quotes`, `make:stage`, `make:view`):
@@ -49,7 +54,7 @@ Quotes, as an example (`php bin/pype make:routes quotes`, `make:stage`, `make:vi
 $router->group('/quotes', ['web', Authenticate::with(redirectTo: '/login')], function (Router $router) {
     $router->get('/', [LoadQuotes::class, QuotesView::class])->name('index');
     $router->get('/new', [QuoteFormView::class])->name('create');
-    // The handler returns the new Quote; the outlet sends browsers to its page (JSON clients get the quote).
+    // CreateQuote returns the new Quote; the outlet sends browsers to its page (JSON clients get the quote).
     // `new` here because the outlet takes a closure, which ::with() can't carry.
     $router->post('/', [ValidateQuote::class, CreateQuote::class, new RedirectOutlet('quotes.show', fn (Quote $quote) => ['id' => $quote->id], flash: 'Quote created.')])->name('store');
 
@@ -63,7 +68,7 @@ $router->group('/quotes', ['web', Authenticate::with(redirectTo: '/login')], fun
 
 // routes/quotes/api.php: the same stages, JSON out (served under /api/quotes)
 $router->group('/quotes', ['auth'], function (Router $router) {
-    $router->get('/{id}', [LoadQuote::class, fn (Quote $quote) => $quote])->name('show');
+    $router->get('/{id}', [LoadQuote::class, QuoteJson::class])->name('show');   // a JsonOutlet subclass: what clients see
     $router->post('/', [ValidateQuote::class, CreateQuote::class])->name('store');
 }, name: 'quotes.');
 ```
@@ -96,13 +101,18 @@ final class ValidateQuote extends Validate                 // app/Stages: rules 
     }
 }
 
-final class CreateQuote                                    // app/Handlers: the work; returns the result
+#[Requires(ValidatedInput::class, User::class)]
+final class CreateQuote implements Stage                   // app/Stages: the work; the last stage returns the result
 {
-    public function __invoke(ValidatedInput $input, User $user, Connection $db): Quote
-    {
-        $id = $db->table('quotes')->insert([...$input->all(), 'company_id' => $user->company_id]);
+    public function __construct(private Connection $db) {}
 
-        return $db->table('quotes')->where('id', $id)->as(Quote::class)->first();
+    public function handle(Request $request, Closure $next): mixed
+    {
+        $input = $request->context()->get(ValidatedInput::class);
+        $user = $request->context()->get(User::class);
+        $id = $this->db->table('quotes')->insert([...$input->all(), 'company_id' => $user->company_id]);
+
+        return $this->db->table('quotes')->where('id', $id)->as(Quote::class)->first();
     }
 }
 
@@ -118,7 +128,7 @@ final class QuoteView extends ViewOutlet                   // app/Views: what th
 }
 ```
 
-A handler that must decide where to go (or a stage that stops early) returns
+A stage that must decide where to go (or stops early) returns
 `redirect('route.name', [...], flash: '...')` instead. `php bin/pype routes:check` confirms every stage comes after what it needs; `Chain` tests a stage alone,
 `TestClient` the whole route.
 
@@ -130,11 +140,14 @@ A handler that must decide where to go (or a stage that stops early) returns
   (`Quote`, a `Page` of quotes) and let the page outlet pick from it.
 - **`ContainerAware` in your own stages.** Ask for services in the constructor; give arguments with
   `X::with(...)`.
-- **Logic in route closures.** A short `fn (Quote $quote) => $quote` to end a JSON route is fine; anything
-  that decides, writes or calls a service is a class.
-- **A repository class per table by default.** Stages and handlers query with `$db->table()`. Put logic
-  several handlers share (numbering inside a transaction, totals) in a plain service class.
-- **403 for another user's record**, or checking ownership inside the handler. A `Load` stage gives 404.
+- **Logic in route closures.** Every step is a stage class; a JSON route ends in a `JsonOutlet`
+  subclass (or the default one) rather than a closure that returns data.
+- **A repository class per table by default.** Stages query with `$db->table()`. Put logic several
+  stages share (numbering inside a transaction, totals) in a plain service class.
+- **A separate "handler" or "controller" layer.** The step that does the work is a stage like any other
+  (it just returns instead of calling `$next`).
+- **403 for another user's record**, or checking ownership in the stage that does the work. A `Load`
+  stage gives 404.
 - **Your own throttle, per-user unique check, redirect-with-message, pagination links or form token
   scraping in tests.** They're built in: `Throttle::with(..., by:, key:)`, `unique:...,{user.prop}`,
   `redirect()` / `RedirectOutlet`, `paginate(25, $request)` + `$page->links()`, `submit()` / `actingAs()`.
@@ -246,7 +259,7 @@ $ php bin/pype routes:check
 | `new Cors([...origins])`            | CORS headers + preflight                                                |
 | `new JsonBody(maxBytes: ...)`       | 413 on big bodies, 400 on malformed JSON                                |
 | `new MethodOverride()` (global)     | forms send PUT/PATCH/DELETE via a hidden `_method` field                |
-| `RedirectOnSuccess::with($to, $msg)`  | reuse an API handler from a form: redirect + flash on success; `$to` is a path or a route name |
+| `RedirectOnSuccess::with($to, $msg)`  | reuse an API route's stages from a form: redirect + flash on success; `$to` is a path or a route name |
 | `new RedirectOutlet('route', ...)`  | end a route with a redirect on success, the way `View` ends one with a page (see Redirects) |
 | `redirect('route', flash: '...')`   | return from any stage to stop there and redirect (see Redirects)       |
 
@@ -263,7 +276,7 @@ The same users and stages serve both. Only the first and last stages differ.
 
 Auth isn't tied to either. `Authenticate` asks a list of *guards* who the user is (from
 `config/auth.php`: session, then bearer token). How a user proves who they are is your
-handler's job; `SessionGuard::login()` just remembers the result. For anything else (API keys,
+login stage's job; `SessionGuard::login()` just remembers the result. For anything else (API keys,
 a header from your proxy), implement `Pype\Auth\Guard`:
 
 ```php
@@ -359,7 +372,7 @@ Two ways, depending on who decides:
 // The route decides: on success, redirect. {id} comes from the matched route by itself.
 $router->post('/quotes/{id}/accept', [LoadQuote::class, AcceptQuote::class, new RedirectOutlet('quotes.show', flash: 'Quote accepted.')]);
 
-// From what the handler returned (a new record's id):
+// From what the last stage returned (a new record's id):
 new RedirectOutlet('quotes.show', fn (Quote $quote) => ['id' => $quote->id])
 
 // A stage decides, and nothing after it runs:
@@ -434,10 +447,9 @@ $router->post('/register', [
   `Pype\Validation\Rule`. Scope database rules with objects: `new Unique('categories', 'name', where: ['user_id' => $user->id])`.
 - **A regex containing `|`** must use the array form: `['regex:/^(cat|dog)$/']`.
 
-Numbers: `min:`/`max:` are inclusive (`min:0.01` means ≥ 0.01; there is no `gt`). Rules are
-fixed per route and can't see the signed-in user, so "unique per user" (`sku` unique within one
-user's items) is a unique index on `(user_id, sku)` plus a check in the handler (or the
-`PDOException` → 409 mapping in `AppProvider`).
+Numbers: `min:`/`max:` are inclusive (`min:0.01` means ≥ 0.01; there is no `gt`). "Unique per user"
+(`sku` unique within one user's items): `unique:items,sku,{id},id,user_id={user.id}` (see "Roles,
+ownership and per-user limits"), backed by a unique index on `(user_id, sku)`.
 
 ### Tidy the input first: `prepare()`
 
@@ -466,12 +478,12 @@ final class ValidateQuote extends Validate
 - The request isn't changed: a failed form comes back exactly as typed (`$old('lines.2.quantity')`), and
   later stages still see what was sent.
 - `ValidatedInput` gets the prepared data, numbered again where a list lost rows (`0, 2, 4` → `0, 1, 2`),
-  so the handler loops over clean rows. Arrays keyed on purpose (`prices[17]`) keep their keys.
+  so the next stage loops over clean rows. Arrays keyed on purpose (`prices[17]`) keep their keys.
 
 ## Forgotten passwords and email verification
 
-Both flows are app code you can change (routes in `routes/web.php`, handlers in
-`app/Handlers/Web`, emails in `app/Mail`, pages in `resources/views/auth`). The parts that are
+Both flows are app code you can change (routes in `routes/web.php`, stages in
+`app/Stages/Web`, emails in `app/Mail`, pages in `resources/views/auth`). The parts that are
 easy to get wrong are in the framework:
 
 - **Password reset:** `/password/forgot` emails a link; `/password/reset/{token}` sets a new
@@ -543,18 +555,20 @@ it off); outside debug it only runs when enabled and given `stages` that guard i
 pype has no roles or policy system; these are stages you write (a few lines each).
 
 **Records that belong to a user:** load them in a stage, and answer **404 (not 403) when it
-isn't theirs**, so ids don't leak. The handler then takes the record by type:
+isn't theirs**, so ids don't leak. Later stages read the record from the context:
 
 ```php
+#[Requires(User::class)]
+#[Provides(Quote::class)]
 final class LoadQuote implements Stage
 {
-    public function __construct(private readonly Quotes $quotes)   // your repository, injected
+    public function __construct(private readonly Connection $db)
     {
     }
 
     public function handle(Request $request, Closure $next): mixed
     {
-        $quote = $this->quotes->find((int) $request->param('id'));
+        $quote = $this->db->table('quotes')->where('id', (int) $request->param('id'))->as(Quote::class)->first();
         $user = $request->context()->get(User::class);
 
         if ($quote === null || $quote->user_id !== $user->id) {
@@ -567,7 +581,7 @@ final class LoadQuote implements Stage
     }
 }
 
-$router->group('/quotes/{id}', ['auth', LoadQuote::class], fn (Router $r) => $r->get('/', fn (Quote $quote) => $quote));
+$router->group('/quotes/{id}', ['auth', LoadQuote::class], fn (Router $r) => $r->get('/', [QuoteJson::class]));
 ```
 
 **Admins:** a column (`users.role` or `is_admin`), a stage that checks it after `Authenticate`,
@@ -657,7 +671,7 @@ nothing is needed.
 
 Slow or unreliable work (emails, exports, calls to other services) can run in a **job** outside
 the request. A job is a plain class: its constructor takes the data (ids, strings, arrays; no
-services), and `handle()` gets services injected by type, like a route handler:
+services), and `handle()` gets services injected by type:
 
 ```php
 final class SendReceipt
@@ -1080,6 +1094,28 @@ $app->outlet(MyJson::class);                                      // app default
 $router->group('/admin', ['auth', View::with('admin/page')], ...);  // every route in the group
 $router->get('/report.csv', [LoadReport::class, CsvOutlet::class]); // one route
 ```
+
+**A JSON outlet per kind of thing** is the JSON twin of a page outlet: extend `JsonOutlet` and return
+from `data()` what clients may see, read from the context. The stages stay the same for HTML and JSON:
+
+```php
+#[Requires(User::class)]
+final class UserJson extends JsonOutlet                       // app/Outlets
+{
+    protected function data(mixed $data, Request $request): mixed
+    {
+        $user = $request->context()->get(User::class);
+
+        return ['id' => $user->id, 'name' => $user->name, 'email' => $user->email];   // never the password hash
+    }
+}
+
+$router->get('/api/users/{id}', [FindUser::class, UserJson::class]);      // JSON
+$router->get('/users/{id}/profile', [FindUser::class, UserProfile::class]); // the same stage, a page
+```
+
+`data()` gets what the last stage returned too, so it can also reshape a result. Errors and redirects
+pass through unchanged.
 
 Custom formats extend `Pype\Outlet\Outlet` (`render()` + `contentType()`), or extend `JsonOutlet` and
 override `payload()` to change the JSON envelope. `php bin/pype make:outlet CsvOutlet` scaffolds one.

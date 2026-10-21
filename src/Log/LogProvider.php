@@ -78,8 +78,8 @@ final class LogProvider implements Provider
         $stages = $app->config('log.viewer.stages', []);
         if ($app->config('log.viewer.enabled', false) && ($app->config('app.debug') || $stages !== [])) {
             $app->router->group($viewer, $stages, function (Router $r) {
-                $r->get('/', [fn (LogViewer $v, Request $q, \Pype\Routing\Urls $u) => $v->page($q, $u), HtmlOutlet::class])->name('logs');
-                $r->get('/entries', [fn (LogViewer $v, Request $q) => $v->entries($q), JsonOutlet::class])->name('logs.entries');
+                $r->get('/', [ShowLogs::class, HtmlOutlet::class])->name('logs');
+                $r->get('/entries', [ShowLogEntries::class, JsonOutlet::class])->name('logs.entries');
             }, name: 'pype.');
         }
     }

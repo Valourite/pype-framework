@@ -222,6 +222,14 @@ The app wrote its own `TestCase::submitForm()` (load the page, take its CSRF tok
 
 ## Decided with the owner (2026-10-21): the work list
 
+**After 0.9.0 (owner, 2026-10-21): "handlers" are not a pype concept; stages are.** The skeleton has no
+`app/Handlers`: every step is a stage in `app/Stages` (the one doing the work returns the result instead
+of calling `$next`), JSON shaping is a `JsonOutlet` subclass with `data()` (new hook, like
+`ViewOutlet::data()`) in `app/Outlets` (`UserJson`), and no route in the skeleton (or pype's own dev
+pages: `ShowLogs`, `ShowLogEntries`, `MailboxViewer`) uses a closure. Closures and invokables still
+work in the pipeline; the docs no longer teach them.
+
+
 Agreed in a design discussion after the section above. The section above has the evidence; this is what
 to build and the shape agreed. The pipeline idea behind all of it: **a route is stages that run in order
 and talk through the typed request context; a missing entry throws; everything is a class so it is

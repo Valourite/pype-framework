@@ -205,6 +205,14 @@ final class Response
         return $this->outlet;
     }
 
+    public function withData(mixed $data): self
+    {
+        $clone = clone $this;
+        $clone->data = $data;
+
+        return $clone;
+    }
+
     public function withStatus(int $status): self
     {
         $clone = clone $this;

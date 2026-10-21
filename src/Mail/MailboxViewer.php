@@ -4,16 +4,26 @@ declare(strict_types=1);
 
 namespace Pype\Mail;
 
+use Closure;
 use Pype\Http\Request;
 use Pype\Http\Response;
 use Pype\Log\LogViewer;
+use Pype\Pipeline\Stage;
 use Pype\Routing\Urls;
 
 /** The dev mailbox page (/_pype/mail): the list, or one message with ?id=. Registered by MailProvider. */
-final class MailboxViewer
+final class MailboxViewer implements Stage
 {
-    public function __construct(private readonly Mailbox $mailbox, private readonly string $driver)
+    public function __construct(
+        private readonly Mailbox $mailbox,
+        private readonly string $driver,
+        private readonly ?Urls $urls = null,
+    ) {
+    }
+
+    public function handle(Request $request, Closure $next): mixed
     {
+        return $this->page($request, $this->urls ?? Urls::current());
     }
 
     public function page(Request $request, Urls $urls): Response
