@@ -1118,13 +1118,14 @@ with any prefix: `...env_prefixed('MYAPP_')`.
 `SWOOLE_MAX_REQUEST=0` never), which caps any slow memory leak. `SWOOLE_MODE` picks how connections are
 held:
 
-- `base` (default): each worker accepts and owns its connections; no extra hop. When a worker
-  restarts, its open keep-alive connections close with it. A proxy in front (nginx) retries a GET on
-  another connection, but a POST caught on one fails with a 502. Measured with recycling forced
-  every 20,000 requests at 2,000 req/s: 20 dropped connections a minute.
-- `process`: a reactor process holds the connections and hands requests to workers, so restarts drop
-  nothing (0 in the same run, at the same CPU). Use it behind a keep-alive proxy, or set
-  `SWOOLE_MAX_REQUEST=0` if your app doesn't leak.
+- `process` (default): a reactor process holds the connections and hands requests to workers. A
+  worker restart drops nothing, and past capacity requests queue (slow answers) instead of failing.
+  The Helpdesk bench, overloaded at 400 req/s: 0% errors, against 24% in base mode. Below capacity
+  the two measured the same.
+- `base`: each worker accepts and owns its connections, one hop fewer. When a worker restarts, its
+  keep-alive connections close with it (a proxy retries a GET, but a POST caught on one fails with a
+  502: 20 a minute with recycling forced every 20,000 requests at 2,000 req/s), and when it's busy new
+  connections wait on it until the proxy times out.
 
 Workers handle one request at a time, so your code runs exactly as under PHP-FPM. Two
 differences: code changes need a restart, and anything you store in a static variable or

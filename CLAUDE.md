@@ -14,7 +14,9 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.10.0 (2026-10-22): the Helpdesk load test's fixes (ROADMAP "Found by the Helpdesk
+- **Released:** 0.10.1 (2026-10-22): `SWOOLE_MODE` defaults to `process` (overloaded, base mode failed 24%
+  of requests where process queued them).
+  0.10.0 (2026-10-22): the Helpdesk load test's fixes (ROADMAP "Found by the Helpdesk
   load test", H1-H8): `count()` leaves out LEFT JOINs on the joined id, every `SWOOLE_*`/`SQLITE_*` env
   variable is a setting (`env_prefixed()`), `SWOOLE_MODE` base|process, `max_request` 100,000, the
   hydrator casts to declared types, `JsonOutlet::with(status:)` and `Page::map()` from `data()`, grouped

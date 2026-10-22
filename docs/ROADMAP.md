@@ -501,6 +501,9 @@ and 3,000 req/s passes (was ~600).
 `app.swoole.mode` / `SWOOLE_MODE`: `base` (default, the owner's choice) or `process`. In base mode a
 recycled worker drops its keep-alive connections (nginx retries GETs; a POST would 502). Forced
 recycling every 20k requests at 2,000 req/s: base 20 resets, process 0, same CPU. Documented in GUIDE.
+**0.10.1: `process` is the default** (owner, 2026-10-22, after the rerun): overloaded at 400 req/s,
+base mode answered 24% of requests with errors after nginx's 5 s timeout; process mode queued them
+(0% errors), like Octane. Same CPU below capacity.
 
 ### H4. Hydrator casts by parameter type — **done, 0.10.0**
 `Hydrator` (so `->as()` and factories) casts to the constructor's declared type when the database hands

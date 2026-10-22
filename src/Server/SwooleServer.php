@@ -89,15 +89,17 @@ final class SwooleServer
     }
 
     /**
-     * SWOOLE_BASE (1, the default): each worker accepts and owns its connections; no extra hop.
-     * SWOOLE_PROCESS (2): a reactor process holds the connections and hands requests to workers,
-     * so a worker that restarts (max_request) doesn't drop the keep-alive connections it had.
-     * In base mode those connections close with it: a proxy in front retries GETs, but a POST
-     * caught on one fails. Same numbers in OpenSwoole (SIMPLE_MODE / POOL_MODE).
+     * SWOOLE_PROCESS (2, the default): a reactor process holds the connections and hands requests
+     * to workers. A worker that restarts (max_request) drops nothing, and past capacity requests
+     * queue instead of failing (Helpdesk bench, overloaded: 0% errors vs 24% in base mode).
+     * Below capacity it measured the same as base.
+     * SWOOLE_BASE (1): each worker accepts and owns its connections; no extra hop, but they close
+     * when it restarts (a proxy retries GETs; a POST fails) and wait on it while it's busy.
+     * Same numbers in OpenSwoole (SIMPLE_MODE / POOL_MODE).
      */
     public function mode(): int
     {
-        $mode = $this->settings['mode'] ?? 'base';
+        $mode = $this->settings['mode'] ?? 'process';
 
         return match (is_string($mode) ? strtolower($mode) : $mode) {
             'base', 1 => 1,

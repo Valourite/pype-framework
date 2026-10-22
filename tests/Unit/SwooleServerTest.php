@@ -181,11 +181,12 @@ final class SwooleServerTest extends TestCase
         $this->assertArrayNotHasKey('mode', $s, 'mode is the constructor argument, not a setting');
     }
 
-    public function test_mode_is_base_unless_set(): void
+    public function test_mode_is_process_unless_set(): void
     {
         $app = new Application(__DIR__);
 
-        $this->assertSame(1, (new SwooleServer($app))->mode());
+        $this->assertSame(2, (new SwooleServer($app))->mode());
+        $this->assertSame(1, (new SwooleServer($app, settings: ['mode' => 'base']))->mode());
         $this->assertSame(2, (new SwooleServer($app, settings: ['mode' => 'process']))->mode());
         $this->assertSame(2, (new SwooleServer($app, settings: ['mode' => 'PROCESS']))->mode());
         $this->assertSame(1, (new SwooleServer($app, settings: ['mode' => 1]))->mode());
