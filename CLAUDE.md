@@ -16,7 +16,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 - **Released:** 0.11.0 (2026-10-22): `Pype\Auth\Authorize` (a stage you extend with `allows()`, filled from the context;
   403/404/redirect; routes:check reads its parameters) and `make:authorize`.
-- **Released:** 0.10.1 (2026-10-22): `SWOOLE_MODE` defaults to `process` (overloaded, base mode failed 24%
+  0.10.1 (2026-10-22): `SWOOLE_MODE` defaults to `process` (overloaded, base mode failed 24%
   of requests where process queued them).
   0.10.0 (2026-10-22): the Helpdesk load test's fixes (ROADMAP "Found by the Helpdesk
   load test", H1-H8): `count()` leaves out LEFT JOINs on the joined id, every `SWOOLE_*`/`SQLITE_*` env
