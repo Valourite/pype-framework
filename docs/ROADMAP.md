@@ -96,6 +96,9 @@ places where pype itself, not the docs, came up short:
 - **Roles / authorization:** no built-in; apps write an ownership stage and an admin stage
   (documented in GUIDE "Roles, ownership and per-user limits"). Idea: a small `Authorize`
   stage taking a closure (`fn (User $u, Quote $q) => ...`), 404 or 403 on false.
+  **Done 2026-10-22 (0.11.0):** `Pype\Auth\Authorize`, a stage you extend with `allows(User $u, Quote $q): bool`
+  (filled from the context; 403/404/redirect on false; routes:check reads its parameters). The owner
+  chose a class per rule over closures or a named-ability registry: routes stay lists of classes.
 
 ## Found by building quotes and invoices in the expenses app (2026-10-21)
 
@@ -304,7 +307,7 @@ throttled per user; CLAUDE.md built-ins rows.
 - `new Throttle(20, 3600, by: User::class)`: the key uses the user id from the context (shared across that
   user's devices); guests fall back to the IP.
 - A `unique` rule that can read a context entry (per-company SKU).
-- **Roles / `Authorize` stage: parked, review later.** No tenancy system.
+- **Roles / `Authorize` stage:** done 2026-10-22 (0.11.0) as an abstract `Pype\Auth\Authorize` stage you extend with `allows()` (no registry, no closures in routes). No tenancy system.
 
 ### D6. Dev mailbox (was 6) — **done 2026-10-21, uncommitted**
 Built: `Pype\Mail\Mailbox` (JSON file per message in `storage/mail`, newest `keep` kept, links extracted),

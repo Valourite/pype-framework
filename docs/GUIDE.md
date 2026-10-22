@@ -251,6 +251,7 @@ $ php bin/pype routes:check
 | `'web'`                             | session cookie + CSRF check + validation errors back to the form         |
 | `Pype\Auth\Auth`                    | `createUser`, `attempt`, `issueToken`, `revoke`, `revokeAll`            |
 | `Throttle::with(5, 60)`               | rate limit **per IP + route** (429 + `Retry-After`); counters in the database or APCu (`RATE_LIMIT_DRIVER`). Per user: see Roles, ownership and per-user limits |
+| `extends Authorize` (`make:authorize`) | may this user do this? `allows(User $user, Quote $quote): bool`; 403, 404 or a redirect when not (see Roles, ownership...) |
 | `Validate::with([...rules])`          | 422 on bad input; `ValidatedInput` injected on success (see Validation) |
 | `Pype\Cache\Cache`                 | `remember`, locks, background refresh, groups; file, APCu or database (see Cache) |
 | `Pype\Queue\Queue`                 | background jobs: `push`, `later`, retries, `queue:work` (see Queue); `routes/schedule.php` for cron tasks |
@@ -552,7 +553,8 @@ it off); outside debug it only runs when enabled and given `stages` that guard i
 
 ## Roles, ownership and per-user limits
 
-pype has no roles or policy system; these are stages you write (a few lines each).
+pype has no roles table or policy registry. Who may do what is a stage: a `Load` stage for records
+that belong to someone, and an `Authorize` subclass for any other rule.
 
 **Records that belong to a user:** load them in a stage, and answer **404 (not 403) when it
 isn't theirs**, so ids don't leak. Later stages read the record from the context:
@@ -584,8 +586,46 @@ final class LoadQuote implements Stage
 $router->group('/quotes/{id}', ['auth', LoadQuote::class], fn (Router $r) => $r->get('/', [QuoteJson::class]));
 ```
 
-**Admins:** a column (`users.role` or `is_admin`), a stage that checks it after `Authenticate`,
-and a named stack: `$app->stack('admin', ['web', Authenticate::with(redirectTo: '/login'), EnsureAdmin::class])`.
+**Admins and other rules: extend `Authorize`** (`php bin/pype make:authorize EnsureAdmin`). Write one
+method, `allows()`. Its parameters come from the request context by type (the user, a record a `Load`
+stage put there) and from route params by name; return `false` to stop the route.
+
+```php
+final class EnsureAdmin extends Authorize
+{
+    protected ?string $message = 'Only admins can do that.';
+
+    public function allows(User $user): bool
+    {
+        return $user->role === 'admin';      // a column on your users table; pype has no roles table
+    }
+}
+
+final class CanEditTicket extends Authorize
+{
+    protected int $status = 404;             // hide it rather than say it's there
+
+    public function allows(User $user, Ticket $ticket): bool
+    {
+        return $ticket->team_id === $user->team_id && $ticket->status !== 'closed';
+    }
+}
+
+$app->stack('admin', ['web', Authenticate::with(redirectTo: '/login'), EnsureAdmin::class]);
+$router->patch('/tickets/{id}', ['auth', LoadTicket::class, CanEditTicket::class, ValidateTicket::class, UpdateTicket::class]);
+```
+
+- It's a stage, so it runs where you list it: before validation, between two loads, anywhere.
+- **Failing:** `$status` 403 by default, 404 to hide the record (use 404 for "not theirs", 403 for
+  "theirs, but not allowed" or "not an admin"). `$message` is the error text. `$redirectTo` (a route
+  name or path) sends browsers there with `$message` flashed; JSON clients still get the status.
+  Per route: `EnsureAdmin::with(status: 404)`, `::with(redirectTo: 'home', message: 'Admins only.')`.
+- **routes:check** reads `allows()`'s parameters: a check listed before the stage that loads its
+  record is reported. A nullable parameter (`?User $user`) is optional.
+- **Services** (`Connection`, ...) go in a constructor and are autowired; `allows()` takes only what
+  the context holds.
+- **In a page** (hide the Invite button): `(new EnsureAdmin())->allows($user)`, or `->check($request)`
+  from an outlet that has the request.
 
 **Per-user rate limits:** `Throttle` counts per IP and route by default. `by:` counts per signed-in
 user instead (all their devices together; guests fall back to their IP), and `key:` lets several

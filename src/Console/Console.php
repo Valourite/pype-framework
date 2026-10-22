@@ -35,6 +35,7 @@ final class Console
             'routes' => ['List routes and their compiled pipelines', $this->routes(...)],
             'routes:check' => ['Check every route\'s stage order: what a stage #[Requires] must be #[Provides]d before it', $this->routesCheck(...)],
             'make:stage' => ['Create app/Stages/<Name>.php', fn (array $a) => $this->make('Stages', $a[0] ?? null, 'stage')],
+            'make:authorize' => ['Create app/Stages/<Name>.php (may this user do this? 403/404 when not)', fn (array $a) => $this->make('Stages', $a[0] ?? null, 'authorize')],
             'make:outlet' => ['Create app/Outlets/<Name>.php', fn (array $a) => $this->make('Outlets', $a[0] ?? null, 'outlet')],
             'make:view' => ['Create app/Views/<Name>.php (a page: reads the context) and its template', $this->makeView(...)],
             'make:provider' => ['Create app/Providers/<Name>.php', fn (array $a) => $this->make('Providers', $a[0] ?? null, 'provider')],
@@ -884,6 +885,30 @@ final class Console
                     public function handle(Request \$request, Closure \$next): mixed
                     {
                         return \$next(\$request);
+                    }
+                }
+                PHP,
+            'authorize' => <<<PHP
+                use App\Data\User;
+                use Pype\Auth\Authorize;
+
+                /**
+                 * allows() gets what earlier stages put in the context (the user, a record a Load stage
+                 * loaded) and route params by name. false stops the route. Services go in a constructor.
+                 *
+                 *   \$router->patch('/things/{id}', ['auth', LoadThing::class, {$class}::class, ...]);
+                 */
+                final class {$class} extends Authorize
+                {
+                    protected int \$status = 403;              // 404 hides that the record exists
+
+                    protected ?string \$message = null;        // default: Forbidden / Not Found
+
+                    protected ?string \$redirectTo = null;     // pages: send browsers here instead (route name or path)
+
+                    public function allows(User \$user): bool
+                    {
+                        return false;
                     }
                 }
                 PHP,
