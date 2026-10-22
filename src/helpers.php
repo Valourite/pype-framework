@@ -14,6 +14,19 @@ if (!function_exists('env')) {
     }
 }
 
+if (!function_exists('env_prefixed')) {
+    /**
+     * Every .env variable with a prefix, as settings: env_prefixed('SWOOLE_') turns
+     * SWOOLE_MAX_REQUEST=0 into ['max_request' => 0]. Config files spread it over their defaults.
+     *
+     * @return array<string, mixed>
+     */
+    function env_prefixed(string $prefix): array
+    {
+        return Env::prefixed($prefix);
+    }
+}
+
 if (!function_exists('e')) {
     /** Escape a value for HTML output. */
     function e(mixed $value): string

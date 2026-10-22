@@ -45,17 +45,32 @@ final class Request
      *
      * @param array<string, mixed>  $body
      * @param array<string, string> $headers
-     * @param array<string, UploadedFile|list<UploadedFile>> $files  e.g. ['receipt' => UploadedFile::fake($path)]
+     * @param array<string, UploadedFile|list<UploadedFile|null>|null> $files  e.g. ['receipt' => UploadedFile::fake($path)];
+     *        null is a file input left empty
      */
-    public static function create(string $method, string $uri, array $body = [], array $headers = [], array $files = []): self
+    public static function create(string $method, string $uri, array $body = [], array $headers = [], array $files = [], string $ip = '127.0.0.1'): self
     {
+        // A null file (or row) is an input left empty: dropped, as fromGlobals() drops UPLOAD_ERR_NO_FILE.
+        // The form is still multipart, as a browser sends it.
+        $multipart = $files !== [];
+        foreach ($files as $field => $file) {
+            if (is_array($file)) {
+                $file = array_values(array_filter($file, static fn ($f) => $f !== null));
+            }
+            if ($file === null || $file === []) {
+                unset($files[$field]);
+            } else {
+                $files[$field] = $file;
+            }
+        }
+
         $parts = parse_url($uri);
         parse_str($parts['query'] ?? '', $query);
 
         $headers = array_change_key_case($headers, CASE_LOWER);
         $raw = $body === [] ? '' : json_encode($body, JSON_THROW_ON_ERROR);
 
-        if ($files !== []) {
+        if ($multipart) {
             // Like a browser: multipart form, no JSON body.
             $raw = '';
             $headers['content-type'] ??= 'multipart/form-data; boundary=pype';
@@ -63,7 +78,7 @@ final class Request
             $headers['content-type'] ??= 'application/json';
         }
 
-        return new self(strtoupper($method), $parts['path'] ?? '/', $query, $body, $headers, $raw, cookies: self::parseCookies($headers['cookie'] ?? ''), files: $files);
+        return new self(strtoupper($method), $parts['path'] ?? '/', $query, $body, $headers, $raw, $ip, self::parseCookies($headers['cookie'] ?? ''), $files);
     }
 
     public static function fromGlobals(): self

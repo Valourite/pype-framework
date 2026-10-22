@@ -8,6 +8,7 @@ use InvalidArgumentException;
 use LogicException;
 use PHPUnit\Framework\TestCase;
 use Pype\Database\Connection;
+use Pype\Database\QueryBuilder;
 use Pype\Database\Schema\Schema;
 use Pype\Database\Schema\Table;
 use Pype\Tests\Support\TestDatabase;
@@ -32,6 +33,34 @@ final class QueryBuilderTest extends TestCase
         });
         $this->db->execute("INSERT INTO categories (name) VALUES ('Food'), ('Rent'), ('Unused')");
         $this->db->execute("INSERT INTO expenses (category_id, amount, note) VALUES (1, 10, 'a'), (1, 30, 'b'), (2, 500, 'c'), (NULL, 7, 'd')");
+    }
+
+    public function test_count_leaves_out_left_joins_on_the_joined_id(): void
+    {
+        $count = fn () => $this->db->table('expenses as e')->leftJoin('categories as c', 'c.id', '=', 'e.category_id');
+
+        $this->assertSame(4, $count()->count());
+        $this->assertSame(1, $count()->whereNull('c.id')->count(), 'a where reads the join: kept');
+        $this->assertSame(1, $count()->whereRaw('c.name = ?', ['Rent'])->count(), 'raw SQL reads it too');
+        $this->assertSame(3, $count()->where('e.amount', '>', 9)->count());
+
+        // A join to a table that doesn't exist only works if count() really leaves it out.
+        $this->assertSame(4, $this->db->table('expenses as e')->leftJoin('nope as n', 'n.id', '=', 'e.category_id')->select('e.*', 'n.name')->count());
+        $this->assertSame(4, $this->db->table('expenses')->leftJoin('nope', 'expenses.category_id', '=', 'nope.id')->count(), 'either side, no alias');
+
+        foreach ([
+            'inner join' => fn () => $this->db->table('expenses as e')->join('nope as n', 'n.id', '=', 'e.category_id')->count(),
+            'not on its id' => fn () => $this->db->table('expenses as e')->leftJoin('nope as n', 'n.expense_id', '=', 'e.id')->count(),
+            'a where reads it' => fn () => $this->db->table('expenses as e')->leftJoin('nope as n', 'n.id', '=', 'e.category_id')->where('n.name', 'x')->count(),
+            'a later join reads it' => fn () => $this->db->table('expenses as e')->leftJoin('nope as n', 'n.id', '=', 'e.category_id')->join('categories as c', 'c.id', '=', 'n.category_id')->count(),
+        ] as $case => $query) {
+            try {
+                $query();
+                $this->fail("{$case}: the join should have been kept");
+            } catch (\PDOException) {
+                $this->addToAssertionCount(1);
+            }
+        }
     }
 
     public function test_aliases_and_joins(): void
@@ -98,12 +127,50 @@ final class QueryBuilderTest extends TestCase
         $this->assertFalse($expenses()->where('amount', 0)->exists());
     }
 
+    public function test_grouped_conditions(): void
+    {
+        $notes = fn (QueryBuilder $q) => array_column($q->orderBy('id')->get(), 'note');
+
+        // amount > 20 AND (note = 'a' OR note = 'c'): without the parentheses 'a' would match too.
+        $query = $this->db->table('expenses')->where('amount', '>', 20)
+            ->where(fn (QueryBuilder $q) => $q->where('note', 'a')->orWhere('note', 'c'));
+        $this->assertSame(['c'], $notes($query));
+        $this->assertStringContainsString('WHERE "amount" > ? AND ("note" = ? OR "note" = ?)', $query->toSql());
+        $this->assertSame([20, 'a', 'c'], $query->bindings());
+
+        // orWhere with a group, nested groups, a group with whereNull/whereIn, and an empty group.
+        $this->assertSame(['a', 'd'], $notes($this->db->table('expenses')->where('note', 'a')
+            ->orWhere(fn (QueryBuilder $q) => $q->whereNull('category_id')->where(fn (QueryBuilder $q) => $q->where('amount', 7)->orWhere('amount', 8)))));
+        $this->assertSame(['b', 'c'], $notes($this->db->table('expenses')->where(fn (QueryBuilder $q) => $q->whereIn('note', ['b', 'c']))->where(fn () => null)));
+
+        // Works with joins, counts and pages.
+        $search = fn () => $this->db->table('expenses as e')->leftJoin('categories as c', 'c.id', '=', 'e.category_id')
+            ->where(fn (QueryBuilder $q) => $q->where('c.name', 'Rent')->orWhere('e.note', 'd'));
+        $this->assertSame(2, $search()->count());
+        $this->assertSame(2, $search()->paginate(1, 2)->total);
+    }
+
+    public function test_order_by_raw(): void
+    {
+        $query = $this->db->table('expenses')->where('amount', '>', 1)
+            ->orderByRaw('ABS(amount - ?) ASC', [25])->orderBy('id');
+
+        $this->assertSame(['b', 'a', 'd', 'c'], array_column($query->get(), 'note'));   // closest to 25 first
+        $this->assertSame([1, 25], $query->bindings());
+        $this->assertSame(4, $query->count(), 'count drops the order and its bindings');
+        $this->assertTrue($query->exists());
+        $this->assertSame(['b', 'a'], array_column($query->paginate(2, 1)->items, 'note'));
+
+        $rank = "CASE note WHEN 'c' THEN 1 WHEN 'a' THEN 2 ELSE 3 END";
+        $this->assertSame(['c', 'a', 'b', 'd'], array_column($this->db->table('expenses')->orderByRaw($rank)->orderBy('id')->get(), 'note'));
+    }
+
     public function test_paginate(): void
     {
         $page = $this->db->table('expenses')->orderBy('amount')->paginate(perPage: 3, page: 2);
 
         $this->assertSame([['id' => 3, 'category_id' => 2, 'amount' => 500, 'note' => 'c']], $page->items);
-        $this->assertSame(['page' => 2, 'per_page' => 3, 'total' => 4, 'last_page' => 2], $page->meta());
+        $this->assertSame(['page' => 2, 'per_page' => 3, 'total' => 4, 'last_page' => 2, 'next' => null, 'previous' => '?'], $page->meta());
         $this->assertTrue($page->hasPrevious());
         $this->assertFalse($page->hasNext());
 

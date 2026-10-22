@@ -11,7 +11,7 @@ use Pype\Http\Response;
  * One page of results, from $query->paginate($perPage, $request).
  *
  * Return it from a handler: the data is the page's items, and the response meta carries
- * {"pagination": {"page", "per_page", "total", "last_page"}}. Views receive the items as their
+ * {"pagination": {"page", "per_page", "total", "last_page", "next", "previous"}}. Views receive the items as their
  * data, the numbers as $meta['pagination'], and this object as $page for the links:
  *
  *   <?php foreach ($page->links() as $link): ?> ... <?php endforeach ?>
@@ -98,10 +98,23 @@ final readonly class Page implements Responsable
         return $links;
     }
 
-    /** @return array{page: int, per_page: int, total: int, last_page: int} */
+    /** @return array{page: int, per_page: int, total: int, last_page: int, next: ?string, previous: ?string} */
     public function meta(): array
     {
-        return ['page' => $this->page, 'per_page' => $this->perPage, 'total' => $this->total, 'last_page' => $this->lastPage()];
+        return ['page' => $this->page, 'per_page' => $this->perPage, 'total' => $this->total, 'last_page' => $this->lastPage(), 'next' => $this->nextUrl(), 'previous' => $this->previousUrl()];
+    }
+
+    /**
+     * The same page with each item mapped, e.g. to what API clients may see:
+     * `$page->map(fn (Ticket $t) => ['id' => $t->id, 'subject' => $t->subject])`.
+     *
+     * @template U
+     * @param callable(T): U $fn
+     * @return self<U>
+     */
+    public function map(callable $fn): self
+    {
+        return new self(array_map($fn, $this->items), $this->total, $this->perPage, $this->page, $this->urls);
     }
 
     public function toResponse(): Response

@@ -259,7 +259,8 @@ final class Connection
 
         $pdo = new PDO('sqlite:' . $path, null, null, $options);
 
-        // Tuned for a read-heavy web workload. All overridable in config/database.php.
+        // Tuned for a read-heavy web workload. All overridable in config/database.php, whose
+        // 'pragmas' the skeleton fills from .env (SQLITE_BUSY_TIMEOUT=10000); null leaves one unset.
         $pragmas = [
             'journal_mode' => 'WAL',      // readers don't block the writer
             'synchronous' => 'NORMAL',    // safe with WAL, far fewer fsyncs
@@ -271,8 +272,15 @@ final class Connection
         ];
 
         foreach ($pragmas as $name => $value) {
-            if ($path === ':memory:' && $name === 'journal_mode') {
+            if ($value === null || ($path === ':memory:' && $name === 'journal_mode')) {
                 continue;
+            }
+            if (is_bool($value)) {
+                $value = $value ? 'ON' : 'OFF';
+            }
+            // Names and values come from config and .env, and a PRAGMA can't take a bound value.
+            if (!preg_match('/^[a-z_]+$/i', (string) $name) || !preg_match('/^-?[A-Za-z0-9_.]+$/', (string) $value)) {
+                throw new InvalidArgumentException("Invalid SQLite pragma [{$name} = {$value}].");
             }
             $pdo->exec("PRAGMA {$name} = {$value}");
         }

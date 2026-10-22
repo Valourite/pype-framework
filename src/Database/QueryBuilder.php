@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pype\Database;
 
+use Closure;
 use InvalidArgumentException;
 use LogicException;
 use Pype\Http\Request;
@@ -47,6 +48,9 @@ final class QueryBuilder
     /** @var list<string> */
     private array $joins = [];
 
+    /** @var array<int, string> join index => alias, for LEFT JOINs on the joined table's id (see count()) */
+    private array $countFreeJoins = [];
+
     /** @var list<array{0: 'AND'|'OR', 1: string}> */
     private array $wheres = [];
 
@@ -64,6 +68,9 @@ final class QueryBuilder
 
     /** @var list<string> */
     private array $orders = [];
+
+    /** @var list<mixed> */
+    private array $orderBindings = [];
 
     private ?int $limit = null;
     private ?int $offset = null;
@@ -113,6 +120,14 @@ final class QueryBuilder
 
         $this->joins[] = "{$type} JOIN " . $this->col($table) . ' ON ' . $this->col($first) . ' ' . $this->operator($operator) . ' ' . $this->col($second);
 
+        // LEFT JOIN users AS a ON a.id = t.assignee_id matches at most one row per base row, so a
+        // COUNT(*) doesn't need it (unless a where or another join reads it; count() checks that).
+        preg_match(self::IDENTIFIER, trim($table), $t);
+        $alias = $t[2] ?? $t[1] ?? '';
+        if ($type === 'LEFT' && $operator === '=' && in_array("{$alias}.id", [trim($first), trim($second)], true)) {
+            $this->countFreeJoins[array_key_last($this->joins)] = $alias;
+        }
+
         return $this;
     }
 
@@ -121,9 +136,18 @@ final class QueryBuilder
         return $this->join($table, $first, $operator, $second, 'LEFT');
     }
 
-    /** where('id', 5) or where('age', '>=', 18) */
-    public function where(string $column, mixed $operator, mixed $value = null, string $boolean = 'AND'): self
+    /**
+     * where('id', 5) or where('age', '>=', 18). A closure groups its conditions in parentheses:
+     *
+     *   ->where('team_id', $id)->where(fn (QueryBuilder $q) => $q->where('subject', 'like', $s)->orWhere('email', 'like', $s))
+     *   // WHERE team_id = ? AND (subject LIKE ? OR email LIKE ?)
+     */
+    public function where(string|Closure $column, mixed $operator = null, mixed $value = null, string $boolean = 'AND'): self
     {
+        if ($column instanceof Closure) {
+            return $this->whereGroup($column, $boolean);
+        }
+
         if (func_num_args() === 2) {
             [$operator, $value] = ['=', $operator];
         }
@@ -140,11 +164,29 @@ final class QueryBuilder
         return $this;
     }
 
-    public function orWhere(string $column, mixed $operator, mixed $value = null): self
+    public function orWhere(string|Closure $column, mixed $operator = null, mixed $value = null): self
     {
+        if ($column instanceof Closure) {
+            return $this->whereGroup($column, 'OR');
+        }
+
         return func_num_args() === 2
             ? $this->where($column, '=', $operator, 'OR')
             : $this->where($column, $operator, $value, 'OR');
+    }
+
+    /** The conditions the closure adds, in parentheses: an empty group adds nothing. */
+    private function whereGroup(Closure $group, string $boolean): self
+    {
+        $query = new self($this->db, $this->table);
+        $group($query);
+
+        if ($query->wheres !== []) {
+            $this->wheres[] = [$boolean, '(' . trim($query->clauses($query->wheres, '')) . ')'];
+            array_push($this->bindings, ...$query->bindings);
+        }
+
+        return $this;
     }
 
     /** whereRaw('date(created_at) = ?', ['2026-10-15']) */
@@ -213,6 +255,19 @@ final class QueryBuilder
         }
 
         $this->orders[] = $this->col($column) . ' ' . $direction;
+
+        return $this;
+    }
+
+    /**
+     * An ORDER BY expression as written, with bindings:
+     * orderByRaw("CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 ELSE 3 END"),
+     * orderByRaw('ABS(amount - ?) ASC', [100]). Never put user input in $sql; bind it.
+     */
+    public function orderByRaw(string $sql, array $bindings = []): self
+    {
+        $this->orders[] = $sql;
+        array_push($this->orderBindings, ...array_values($bindings));
 
         return $this;
     }
@@ -318,15 +373,48 @@ final class QueryBuilder
         return $this->db->scalar($query->toSql(), $query->bindings());
     }
 
+    /**
+     * COUNT(*) of the query. LEFT JOINs on the joined table's id (`leftJoin('users as a', 'a.id',
+     * '=', 't.assignee_id')`) are left out when nothing else reads them: they can't change the row
+     * count, and counting through them cost ~10x on a 15,000-row list. This relies on `id` being
+     * the joined table's primary key; if it isn't, pass paginate() a `count:`.
+     */
     public function count(): int
     {
-        return (int) $this->aggregate('COUNT', '*');
+        return (int) $this->withoutCountFreeJoins()->aggregate('COUNT', '*');
+    }
+
+    private function withoutCountFreeJoins(): self
+    {
+        if ($this->countFreeJoins === [] || $this->groups !== [] || $this->limit !== null || $this->offset !== null) {
+            return $this;
+        }
+
+        $query = clone $this;
+
+        foreach ($this->countFreeJoins as $index => $alias) {
+            $elsewhere = [
+                ...array_column($this->wheres, 1),
+                ...array_column($this->havings, 1),
+                ...array_values(array_diff_key($query->joins, [$index => true])),
+            ];
+            $used = preg_match('/(?<![\w.])' . preg_quote($alias, '/') . '\.|' . preg_quote($this->db->quote($alias) . '.', '/') . '/', implode("\n", $elsewhere));
+
+            if (!$used) {
+                unset($query->joins[$index], $query->countFreeJoins[$index]);
+            }
+        }
+
+        $query->joins = array_values($query->joins);
+        $query->countFreeJoins = [];
+
+        return $query;
     }
 
     public function exists(): bool
     {
         $query = (clone $this)->select()->selectRaw('1')->limit(1);
-        $query->orders = [];
+        $query->orders = $query->orderBindings = [];
 
         return (bool) $this->db->scalar('SELECT EXISTS(' . $query->toSql() . ')', $query->bindings());
     }
@@ -519,7 +607,7 @@ final class QueryBuilder
     /** @return list<mixed> in placeholder order */
     public function bindings(): array
     {
-        return [...$this->selectBindings, ...$this->bindings, ...$this->havingBindings];
+        return [...$this->selectBindings, ...$this->bindings, ...$this->havingBindings, ...$this->orderBindings];
     }
 
     /** Run FN(column) over the matching rows. Grouped queries are aggregated over their groups. */
@@ -532,7 +620,7 @@ final class QueryBuilder
             $inner = clone $this;
 
             if ($inner->limit === null && $inner->offset === null) {
-                $inner->orders = [];   // order only matters when it decides which rows a limit keeps
+                $inner->orders = $inner->orderBindings = [];   // order only matters when it decides which rows a limit keeps
             }
 
             if ($column !== '*') {
@@ -545,7 +633,7 @@ final class QueryBuilder
             $value = $this->db->scalar("SELECT {$expression} FROM (" . $inner->toSql() . ') AS ' . $this->db->quote('sub'), $inner->bindings());
         } else {
             $query = (clone $this)->select()->selectRaw($expression);
-            $query->orders = [];
+            $query->orders = $query->orderBindings = [];
             $value = $this->db->scalar($query->toSql(), $query->bindings());
         }
 

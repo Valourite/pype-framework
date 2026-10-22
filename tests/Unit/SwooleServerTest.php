@@ -176,8 +176,22 @@ final class SwooleServerTest extends TestCase
         $s = (new SwooleServer(new Application(__DIR__), settings: ['worker_num' => 8, 'max_request' => null]))->settings();
 
         $this->assertSame(8, $s['worker_num']);
-        $this->assertSame(10000, $s['max_request'], 'null means keep the default');
+        $this->assertSame(100000, $s['max_request'], 'null means keep the default');
         $this->assertFalse($s['enable_coroutine']);
+        $this->assertArrayNotHasKey('mode', $s, 'mode is the constructor argument, not a setting');
+    }
+
+    public function test_mode_is_base_unless_set(): void
+    {
+        $app = new Application(__DIR__);
+
+        $this->assertSame(1, (new SwooleServer($app))->mode());
+        $this->assertSame(2, (new SwooleServer($app, settings: ['mode' => 'process']))->mode());
+        $this->assertSame(2, (new SwooleServer($app, settings: ['mode' => 'PROCESS']))->mode());
+        $this->assertSame(1, (new SwooleServer($app, settings: ['mode' => 1]))->mode());
+
+        $this->expectExceptionMessage("must be 'base' or 'process'");
+        (new SwooleServer($app, settings: ['mode' => 'threads']))->mode();
     }
 
     public function test_cpus_follow_the_container_limit(): void
@@ -301,5 +315,33 @@ final class SwooleServerTest extends TestCase
         $this->assertFalse($s['http_compression']);
         $this->assertSame(4, $s['worker_num']);                            // app.swoole.workers wins over settings
         $this->assertSame(6, SwooleServer::fromApp($app, ['workers' => '6'])->settings()['worker_num']);   // and --workers over both
+    }
+
+    public function test_from_app_reads_flat_settings_like_the_skeleton_config(): void
+    {
+        // config/app.php: ['mode' => 'base', 'max_request' => 100000, ...env_prefixed('SWOOLE_')]
+        putenv('SWOOLE_MAX_REQUEST=0');
+        putenv('SWOOLE_WORKERS=3');
+        putenv('SWOOLE_STATIC_HANDLER=true');
+        putenv('SWOOLE_PACKAGE_MAX_LENGTH=16777216');
+        putenv('SWOOLE_MODE=process');
+        putenv('SWOOLE_BUFFER_OUTPUT_SIZE=');
+        try {
+            $app = new Application(__DIR__, ['app' => ['swoole' => ['mode' => 'base', 'max_request' => 100000, ...env_prefixed('SWOOLE_')]]]);
+            $server = SwooleServer::fromApp($app);
+            $s = $server->settings();
+        } finally {
+            foreach (['MAX_REQUEST', 'WORKERS', 'STATIC_HANDLER', 'PACKAGE_MAX_LENGTH', 'MODE', 'BUFFER_OUTPUT_SIZE'] as $key) {
+                putenv("SWOOLE_{$key}");
+            }
+        }
+
+        $this->assertSame(0, $s['max_request']);                 // .env wins over the config's default
+        $this->assertSame(3, $s['worker_num']);                  // short names
+        $this->assertTrue($s['enable_static_handler']);
+        $this->assertSame(16777216, $s['package_max_length']);   // any setting, typed
+        $this->assertArrayNotHasKey('buffer_output_size', $s);   // blank: left out
+        $this->assertArrayNotHasKey('workers', $s);
+        $this->assertSame(2, $server->mode());
     }
 }

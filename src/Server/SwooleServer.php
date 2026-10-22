@@ -49,28 +49,61 @@ final class SwooleServer
     ) {
     }
 
+    /** Short names config and .env may use for server settings (SWOOLE_WORKERS=4). */
+    private const ALIASES = ['workers' => 'worker_num', 'static_handler' => 'enable_static_handler'];
+
     /**
-     * The server `php bin/pype serve` starts: app.swoole.settings (any OpenSwoole/Swoole server
-     * setting, passed through as is), then workers, max_request and static_handler from config, then
-     * the command's --host/--port/--workers.
+     * The server `php bin/pype serve` starts. `app.swoole` is a list of OpenSwoole/Swoole server
+     * settings, passed through as is over pype's defaults (settings()); the skeleton's config
+     * spreads env_prefixed('SWOOLE_') into it, so any SWOOLE_* variable sets one. Also `mode`
+     * ('base' or 'process'), the short names `workers` and `static_handler`, and, from older
+     * configs, a nested `settings` array (the others win over it). --workers wins over all.
      *
      * @param array<string, string> $options  serve's --name=value options
      */
     public static function fromApp(Application $app, array $options = []): self
     {
-        $workers = $options['workers'] ?? $app->config('app.swoole.workers');
-        $nativeStatic = $app->config('app.swoole.static_handler');
-        $named = array_filter([
-            'worker_num' => $workers === null || $workers === '' ? null : (int) $workers,
-            'max_request' => $app->config('app.swoole.max_request'),
-            // null = pype's default (serve public/ from PHP); true = OpenSwoole's own static handler
-            'enable_static_handler' => $nativeStatic === null || $nativeStatic === '' ? null : filter_var($nativeStatic, FILTER_VALIDATE_BOOLEAN),
-        ], static fn ($v) => $v !== null);
+        $config = (array) $app->config('app.swoole', []);
+        $settings = [...(array) ($config['settings'] ?? []), ...array_diff_key($config, ['settings' => true])];
 
-        return new self($app, $options['host'] ?? '0.0.0.0', (int) ($options['port'] ?? 8000), [
-            ...(array) $app->config('app.swoole.settings', []),
-            ...$named,
-        ]);
+        foreach (self::ALIASES as $short => $name) {
+            if (array_key_exists($short, $settings)) {
+                $settings[$name] = $settings[$short];
+                unset($settings[$short]);
+            }
+        }
+        if (isset($options['workers'])) {
+            $settings['worker_num'] = $options['workers'];
+        }
+        if (is_numeric($settings['worker_num'] ?? null)) {
+            $settings['worker_num'] = (int) $settings['worker_num'];
+        }
+        if (is_string($settings['enable_static_handler'] ?? null)) {
+            $settings['enable_static_handler'] = filter_var($settings['enable_static_handler'], FILTER_VALIDATE_BOOLEAN);
+        }
+
+        return new self($app, $options['host'] ?? '0.0.0.0', (int) ($options['port'] ?? 8000), array_filter(
+            $settings,
+            static fn ($v) => $v !== null && $v !== '',
+        ));
+    }
+
+    /**
+     * SWOOLE_BASE (1, the default): each worker accepts and owns its connections; no extra hop.
+     * SWOOLE_PROCESS (2): a reactor process holds the connections and hands requests to workers,
+     * so a worker that restarts (max_request) doesn't drop the keep-alive connections it had.
+     * In base mode those connections close with it: a proxy in front retries GETs, but a POST
+     * caught on one fails. Same numbers in OpenSwoole (SIMPLE_MODE / POOL_MODE).
+     */
+    public function mode(): int
+    {
+        $mode = $this->settings['mode'] ?? 'base';
+
+        return match (is_string($mode) ? strtolower($mode) : $mode) {
+            'base', 1 => 1,
+            'process', 2 => 2,
+            default => throw new RuntimeException("app.swoole.mode must be 'base' or 'process', not [{$mode}]."),
+        };
     }
 
     public static function available(): bool
@@ -85,14 +118,14 @@ final class SwooleServer
         }
 
         $class = class_exists(\OpenSwoole\Http\Server::class) ? \OpenSwoole\Http\Server::class : \Swoole\Http\Server::class;
-        $server = new $class($this->host, $this->port);
+        $server = new $class($this->host, $this->port, $this->mode());
         $settings = $this->settings();
         $this->nativeStatic = (bool) $settings['enable_static_handler'];
         $server->set($settings);
         $this->app->router->warm();   // built once here; every forked worker inherits the tables
 
         $server->on('start', function () use ($settings) {
-            printf("pype serving on http://%s:%d with OpenSwoole (%d workers). Code changes need a restart.\n", $this->host, $this->port, $settings['worker_num']);
+            printf("pype serving on http://%s:%d with OpenSwoole (%d workers, %s mode). Code changes need a restart.\n", $this->host, $this->port, $settings['worker_num'], $this->mode() === 2 ? 'process' : 'base');
         });
         // A forked worker must never share the master's database handle (e.g. one opened while
         // booting): drop it so each worker connects on its own first query.
@@ -116,7 +149,10 @@ final class SwooleServer
             // workers than cores only adds switching (the twelve bench: 1x beat 2x on CPU and p95).
             // Set SWOOLE_WORKERS higher when requests wait on a network database or bcrypt.
             'worker_num' => self::cpus(),
-            'max_request' => 10000,            // recycle workers now and then, capping any slow leak
+            // Recycle each worker after this many requests, capping any slow leak (0 = never). Rare on
+            // purpose: in base mode a recycled worker drops its keep-alive connections (see mode()).
+            // At 10,000 the helpdesk bench recycled a worker every ~14 s at 700 req/s.
+            'max_request' => 100000,
             'enable_coroutine' => false,       // one request at a time per worker, like PHP-FPM
             'package_max_length' => 8 * 1024 * 1024,
             // Static files (css, images, ...) are served by serveStatic() below. OpenSwoole's own handler
@@ -126,7 +162,7 @@ final class SwooleServer
             'enable_static_handler' => false,
             'document_root' => $this->app->path('public'),
             'http_compression' => false,
-            ...array_filter($this->settings, static fn ($v) => $v !== null),
+            ...array_filter($this->settings, static fn ($v, $k) => $v !== null && $k !== 'mode', ARRAY_FILTER_USE_BOTH),
         ];
     }
 

@@ -117,7 +117,7 @@ final class PaginationTest extends TestCase
         $this->assertTrue($page->hasMore);
         $this->assertSame('/items?sort=n&page=3', $page->nextUrl());
         $this->assertSame('/items?sort=n', $page->previousUrl());
-        $this->assertSame(['pagination' => ['page' => 2, 'per_page' => 10, 'has_more' => true]], $page->toResponse()->meta());
+        $this->assertSame(['pagination' => ['page' => 2, 'per_page' => 10, 'has_more' => true, 'next' => '/items?sort=n&page=3', 'previous' => '/items?sort=n']], $page->toResponse()->meta());
 
         $last = $this->db->table('items')->orderBy('id')->simplePaginate(10, 3);
         $this->assertSame([21, 22, 23], array_column($last->items, 'n'));
@@ -141,7 +141,7 @@ final class PaginationTest extends TestCase
 
         $json = $client->get('/items?page=2');
         $this->assertSame([['n' => 6], ['n' => 7], ['n' => 8], ['n' => 9], ['n' => 10]], $json->json('data'));
-        $this->assertSame(['page' => 2, 'per_page' => 5, 'total' => 23, 'last_page' => 5], $json->json('meta.pagination'));
+        $this->assertSame(['page' => 2, 'per_page' => 5, 'total' => 23, 'last_page' => 5, 'next' => '/items?page=3', 'previous' => '/items'], $json->json('meta.pagination'));
 
         $html = $client->get('/pages?q=x&page=3')->body();
         $this->assertStringContainsString('| 11,12,13,14,15', $html);

@@ -471,16 +471,7 @@ final class Console
     /** Loaded only by the schedule commands, never for web requests. */
     private function schedule(): Schedule
     {
-        $schedule = new Schedule();
-        $file = $this->app->path((string) $this->app->config('app.schedule', Application::SCHEDULE));
-
-        if (is_file($file)) {
-            (static function (Schedule $schedule, Application $app, string $__file): void {
-                require $__file;
-            })($schedule, $this->app, $file);
-        }
-
-        return $schedule;
+        return Schedule::load($this->app);
     }
 
     private function scheduleRun(array $args): int

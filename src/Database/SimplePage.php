@@ -12,7 +12,7 @@ use Pype\Http\Response;
  * extra row is fetched to know whether a next page exists, and no COUNT(*) runs. Only previous
  * and next links, so use it where the total is expensive and nobody needs to jump to page 9,000.
  *
- * JSON meta: {"pagination": {"page", "per_page", "has_more"}}. Views get this object as $page.
+ * JSON meta: {"pagination": {"page", "per_page", "has_more", "next", "previous"}}. Views get this object as $page.
  *
  * @template T
  */
@@ -56,10 +56,22 @@ final readonly class SimplePage implements Responsable
         return $this->hasMore ? $this->url($this->page + 1) : null;
     }
 
-    /** @return array{page: int, per_page: int, has_more: bool} */
+    /** @return array{page: int, per_page: int, has_more: bool, next: ?string, previous: ?string} */
     public function meta(): array
     {
-        return ['page' => $this->page, 'per_page' => $this->perPage, 'has_more' => $this->hasMore];
+        return ['page' => $this->page, 'per_page' => $this->perPage, 'has_more' => $this->hasMore, 'next' => $this->nextUrl(), 'previous' => $this->previousUrl()];
+    }
+
+    /**
+     * The same page with each item mapped (see Page::map()).
+     *
+     * @template U
+     * @param callable(T): U $fn
+     * @return self<U>
+     */
+    public function map(callable $fn): self
+    {
+        return new self(array_map($fn, $this->items), $this->perPage, $this->page, $this->hasMore, $this->urls);
     }
 
     public function toResponse(): Response

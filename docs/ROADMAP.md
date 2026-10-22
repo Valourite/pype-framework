@@ -478,6 +478,59 @@ Composer `post-create-project-cmd` runs `php bin/pype install`, which asks which
 (plain, Latte, BladeOne: runs the `composer require`) and whether to add Faker. Flags for CI:
 `--no-interaction`, `--template=latte`, `--faker`.
 
+## Found by the Helpdesk load test (2026-10-22)
+
+The same Helpdesk app built by fresh AI sessions in pype and Laravel (spec: `../HELPDESK.md` in the
+pype folder), load tested on 2 vCPU / 4 GB with 500k tickets (`~/Github/helpdesk/bench/RESULTS.md`).
+
+### H1. `count()` leaves out LEFT JOINs on the joined id — **done, 0.10.0**
+The AI's list query LEFT JOINed `users` for the assignee's name and `paginate()` counted through it:
+2.7 ms per count vs 0.24 ms, ~85% of the list's cost. `count()` now drops a `leftJoin()` whose ON is
+`<joined alias>.id = ...` when no where, having or other join reads that alias (assumes `id` is the
+primary key; `count:` still overrides). Same app, no app change: 700 req/s went from 145% CPU to 32%,
+and 3,000 req/s passes (was ~600).
+
+### H2. Swoole and SQLite settings from `.env` — **done, 0.10.0**
+`env_prefixed('SWOOLE_')` / `Env::prefixed()`: every `SWOOLE_*` variable becomes a server setting
+(typed), spread last into the skeleton's `app.swoole`, which is now a flat list of server settings
+(`workers`/`static_handler` short names and the old nested `settings` still read). Same for SQLite:
+`SQLITE_*` → pragmas (names and values checked, `null` unsets a default). `max_request` default
+10,000 → 100,000 (it recycled a worker every ~14 s at 700 req/s).
+
+### H3. Server mode — **done, 0.10.0**
+`app.swoole.mode` / `SWOOLE_MODE`: `base` (default, the owner's choice) or `process`. In base mode a
+recycled worker drops its keep-alive connections (nginx retries GETs; a POST would 502). Forced
+recycling every 20k requests at 2,000 req/s: base 20 resets, process 0, same CPU. Documented in GUIDE.
+
+### H4. Hydrator casts by parameter type — **done, 0.10.0**
+`Hydrator` (so `->as()` and factories) casts to the constructor's declared type when the database hands
+back another: `bool` (SQLite 0/1), `int`/`float` (numeric strings), `string` (numbers),
+`DateTimeImmutable`/`DateTimeInterface`, backed enums. Union/mixed/untyped: as is. Casts are worked
+out once per class.
+
+### H5. JSON outlets: status and pages — **done, 0.10.0**
+- `JsonOutlet::with(status: 201)` / `protected ?int $status = 201;`: on success only.
+- `data()` may return a `Responsable` (a `Page`/`SimplePage`): its data and meta are used, so an
+  outlet reading the page from the context keeps `meta.pagination`. `Page::map()` / `SimplePage::map()`
+  shape the items.
+- `meta.pagination` now has `next` and `previous` links (they keep the filters).
+
+### H6. Grouped conditions and raw ordering — **done, 0.10.0**
+`where(fn (QueryBuilder $q) => ...)` / `orWhere(fn ...)` wrap the closure's conditions in parentheses
+(nestable; an empty group adds nothing). `orderByRaw($sql, $bindings)`; its bindings come last and
+are dropped with the order by `count()`/`exists()`.
+
+### H7. Test helpers — **done, 0.10.0**
+`TestClient::withIp()` (shares the cookie jar; `Request::create(..., ip:)`); a `null` file or row in
+`post()`/`submit()` files is an empty input, dropped like `fromGlobals()` drops `UPLOAD_ERR_NO_FILE`,
+and the form stays multipart; `Schedule::load($app)` (the console uses it too) and
+`Schedule::task('command' | Job::class | 'name')`.
+
+### H8. Skeleton — **done, 0.10.0**
+AGENTS.md: index every column a list filters or sorts by (the as-built pype Helpdesk sorted 500k tickets
+by an unindexed `updated_at`: half the throughput). `phpunit.xml` forces `APP_URL` (the Helpdesk tests
+broke when `.env` moved the port).
+
 ## Tier 2: speed and growing apps
 
 - Multiple database connections.

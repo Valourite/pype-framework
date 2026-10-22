@@ -8,6 +8,7 @@ use Closure;
 use DateTimeImmutable;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
+use Pype\Application;
 use Pype\Cache\Cache;
 use Pype\Pipeline\Invoker;
 use Pype\Queue\Queue;
@@ -55,10 +56,45 @@ final class Schedule
         return $this->tasks[] = new Task('job', $job, [], $this->timezone, $queue);
     }
 
+    /**
+     * The app's schedule, read from routes/schedule.php (app.schedule) the way the schedule
+     * commands read it. In a test: check what runs when, or run a task's job yourself.
+     *
+     *   $task = Schedule::load($this->app)->task('invoices:overdue');
+     *   $this->assertSame('0 6 * * *', $task->expression());
+     */
+    public static function load(Application $app): self
+    {
+        $schedule = new self();
+        $file = $app->path((string) $app->config('app.schedule', Application::SCHEDULE));
+
+        if (is_file($file)) {
+            (static function (Schedule $schedule, Application $app, string $__file): void {
+                require $__file;
+            })($schedule, $app, $file);
+        }
+
+        return $schedule;
+    }
+
     /** @return list<Task> */
     public function tasks(): array
     {
         return $this->tasks;
+    }
+
+    /** The first task that is this command (`invoices:overdue`), job class or name(); null if none. */
+    public function task(string $find): ?Task
+    {
+        foreach ($this->tasks as $task) {
+            if ($task->description() === $find
+                || ($task->type === 'command' && $task->target === $find)
+                || ($task->type === 'job' && $task->target instanceof $find)) {
+                return $task;
+            }
+        }
+
+        return null;
     }
 
     /** @return list<Task> */

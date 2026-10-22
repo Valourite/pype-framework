@@ -836,8 +836,24 @@ $db->table('posts as p')
     ->select('u.name')->selectRaw('COUNT(*) AS posts')
     ->groupBy('u.id')->orderBy('posts', 'desc')->get();
 $db->table('orders')->where('user_id', $id)->sum('total');
+$db->table('tickets')->where('team_id', $teamId)                         // a closure groups: AND (... OR ...)
+    ->where(fn (QueryBuilder $q) => $q->where('subject', 'like', $like)->orWhere('email', 'like', $like))
+    ->orderByRaw("CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 ELSE 3 END")   // as written; bind any values
+    ->get();
 $db->select('SELECT * FROM users WHERE email LIKE ?', ['%@example.com']);
 $db->transaction(fn (Connection $db) => ...);
+```
+
+`->as(User::class)` builds each row into the class with only the columns its constructor takes, cast
+to the declared types: SQLite's `0`/`1` into `bool`, numeric strings (MySQL, Postgres) into
+`int`/`float`, a date string into `DateTimeImmutable`, a value into a backed enum. So data classes can
+say what they mean:
+
+```php
+final readonly class Reply
+{
+    public function __construct(public int $id, public bool $internal, public DateTimeImmutable $created_at, public Status $status) {}
+}
 ```
 
 Migrations live in `database/migrations` and run in filename order. `make:migration` writes a
@@ -903,7 +919,8 @@ fn (Request $request, Connection $db) => $db->table('quotes')->where('status', '
 
 - Given the `Request`, the page number comes from `?page=` (anything odd is page 1), and past the end
   (`?page=99999`) you get the last page.
-- Return the `Page`: JSON clients get `{"data": [...], "meta": {"pagination": {page, per_page, total, last_page}}}`;
+- Return the `Page`: JSON clients get `{"data": [...], "meta": {"pagination": {page, per_page, total, last_page, next, previous}}}`
+  (from a JSON outlet: return it from `data()`, see Outlets);
   a view gets the items as its data and the `Page` itself as `$page`. Put it in an array or the context
   yourself and it is the same object.
 - Links keep the request's other query parameters (`?status=`, `?q=`, `?month=`), so filters survive paging:
@@ -923,7 +940,10 @@ fn (Request $request, Connection $db) => $db->table('quotes')->where('status', '
 
   `links()` gives the first and last page and two either side of the current one (`links(1)` for one):
   `1 … 7 8 [9] 10 11 … 9000`. pype ships no markup; this loop is yours.
-- **Big tables.** The total is a `COUNT(*)` over the whole query, joins included. Give a cheaper one, or a
+- **Big tables.** The total is a `COUNT(*)` over the query. pype leaves out a `leftJoin()` on the joined
+  table's `id` (`leftJoin('users as a', 'a.id', '=', 't.assignee_id')`, to show a name) when no where
+  reads it, since it can't change the count: on a 15,000-row list that took the count from 2.7 ms to
+  0.24 ms. It assumes `id` is that table's primary key. Every other join is counted. Give a cheaper one, or a
   number you have: `paginate(25, $request, count: $db->table('quotes')->where('company_id', $id))`,
   `count: $cache->remember(...)`. Or skip the total: `simplePaginate(25, $request)` fetches one extra row
   to know whether there's a next page, runs no count, and has only `previousUrl()`/`nextUrl()`
@@ -1021,7 +1041,11 @@ public function test_creating_a_post(): void
   `$this->client->submit('/items/new', '/items', ['name' => 'Desk'])` loads the form page, takes its
   CSRF token and posts like a browser (the page is the Referer, so a failed validation comes back to
   it); add `'_method' => 'PATCH'` for other verbs. `$this->client->actingAs($user)` signs in without
-  the login form. `withoutCookies()` is a second browser. See `tests/Feature/WebAuthTest.php`.
+  the login form. `withoutCookies()` is a second browser, and `withIp('10.0.0.2')` sends from another
+  address (a per-IP `Throttle`). See `tests/Feature/WebAuthTest.php`.
+- **Uploads:** pass files as the last argument of `post()` / `submit()`:
+  `['receipt' => UploadedFile::fake($path)]`. A file input left empty is `null`:
+  `['attachments' => [$pdf, null, null]]` reaches the app as `[$pdf]`, as a browser's empty rows do.
 - **Assertions** on every response, chainable: `assertOk()`, `assertStatus(419)`, `assertCreated()`,
   `assertNoContent()`, `assertUnauthorized()`, `assertForbidden()`, `assertNotFound()`,
   `assertUnprocessable()`, `assertRedirect('/account')`, `assertSee('<h1>Ada</h1>')` /
@@ -1042,6 +1066,9 @@ public function test_creating_a_post(): void
   `$this->app->container->instance(Pype\Queue\Queue::class, $queue = new Pype\Queue\ArrayQueue())`,
   then `$queue->pushed(SendReceipt::class)`.
 - **Time-based code:** `Fake`, `Cache` and the queue take a clock in their constructors for tests.
+- **The schedule:** `Schedule::load($this->app)` reads `routes/schedule.php` like the schedule
+  commands do. `->task('invoices:overdue')` (a command, a job class or a `name()`) gives the task:
+  `->expression()` is its cron line (`'0 6 * * *'`), `->overlapMinutes()` its overlap lock.
 
 ## Running in production
 
@@ -1075,10 +1102,30 @@ It serves `public/` files too, so no nginx is needed (put one in front for TLS i
 serves them itself (`SwooleServer::serveStatic()`: GET/HEAD only, nothing outside `public/`, never PHP
 files or dotfiles, `Last-Modified` and 304). Swoole's own static handler is off because, in Swoole
 6.2.3, it left the connection corked: every later response on it, pages included, waited about 200 ms.
-Set `app.swoole.static_handler` to `true` to turn it back on (e.g. if nginx serves `public/` anyway
-and you want to test a newer Swoole). Any other server setting goes in `app.swoole.settings`, passed
-through as is (`'package_max_length' => 16 * 1024 * 1024`, timeouts, buffers); `workers`,
-`max_request` and `--workers` win over it.
+Set `SWOOLE_STATIC_HANDLER=true` to turn it back on (e.g. if nginx serves `public/` anyway and you
+want to test a newer Swoole).
+
+**Settings.** `app.swoole` in `config/app.php` is a list of OpenSwoole/Swoole server settings, passed
+through as is over pype's defaults, and it spreads `env_prefixed('SWOOLE_')` last, so **every
+`SWOOLE_*` variable in `.env` sets one**: `SWOOLE_PACKAGE_MAX_LENGTH=16777216` is
+`'package_max_length' => 16777216` (numbers and true/false are typed). Short names: `SWOOLE_WORKERS`
+(`worker_num`) and `SWOOLE_STATIC_HANDLER`. `--workers` wins over all of them. The same goes for
+SQLite: every `SQLITE_*` variable is a pragma (`SQLITE_BUSY_TIMEOUT=10000`, `SQLITE_CACHE_SIZE=-64000`)
+over pype's defaults (WAL, synchronous NORMAL, busy_timeout 5000). Your own config can do the same
+with any prefix: `...env_prefixed('MYAPP_')`.
+
+**Mode and worker recycling.** Each worker restarts after `max_request` requests (default 100,000;
+`SWOOLE_MAX_REQUEST=0` never), which caps any slow memory leak. `SWOOLE_MODE` picks how connections are
+held:
+
+- `base` (default): each worker accepts and owns its connections; no extra hop. When a worker
+  restarts, its open keep-alive connections close with it. A proxy in front (nginx) retries a GET on
+  another connection, but a POST caught on one fails with a 502. Measured with recycling forced
+  every 20,000 requests at 2,000 req/s: 20 dropped connections a minute.
+- `process`: a reactor process holds the connections and hands requests to workers, so restarts drop
+  nothing (0 in the same run, at the same CPU). Use it behind a keep-alive proxy, or set
+  `SWOOLE_MAX_REQUEST=0` if your app doesn't leak.
+
 Workers handle one request at a time, so your code runs exactly as under PHP-FPM. Two
 differences: code changes need a restart, and anything you store in a static variable or
 singleton outlives the request. Keep per-request data on the `Request` (its context), as
@@ -1116,6 +1163,28 @@ $router->get('/users/{id}/profile', [FindUser::class, UserProfile::class]); // t
 
 `data()` gets what the last stage returned too, so it can also reshape a result. Errors and redirects
 pass through unchanged.
+
+**Lists:** return the `Page` from `data()`, mapped to what clients see. Its items become `data` and its
+numbers and links `meta.pagination`, exactly as when a stage returns the page:
+
+```php
+#[Requires(Page::class)]
+final class TicketsJson extends JsonOutlet
+{
+    protected function data(mixed $data, Request $request): mixed
+    {
+        return $request->context()->get(Page::class)->map(fn (Ticket $t) => ['id' => $t->id, 'subject' => $t->subject]);
+    }
+}
+```
+
+**Status:** `JsonOutlet::with(status: 201)` (any subclass too: `ReplyJson::with(status: 201)`), or
+`protected ?int $status = 201;` in the subclass. It applies on success only; errors and redirects keep
+theirs, so the same route can still answer 422 or 404:
+
+```php
+$router->post('/{id}/replies', [LoadTicket::class, ValidateReply::class, CreateReply::class, ReplyJson::with(status: 201)]);
+```
 
 Custom formats extend `Pype\Outlet\Outlet` (`render()` + `contentType()`), or extend `JsonOutlet` and
 override `payload()` to change the JSON envelope. `php bin/pype make:outlet CsvOutlet` scaffolds one.

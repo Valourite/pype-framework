@@ -50,7 +50,40 @@ final class Env
             return $default;
         }
 
-        return match (strtolower((string) $value)) {
+        return self::cast((string) $value);
+    }
+
+    /**
+     * Every variable starting with $prefix, keyed by the rest of its name in lower case, with
+     * numbers cast too: SWOOLE_MAX_REQUEST=0 and SWOOLE_ENABLE_COROUTINE=false give
+     * ['enable_coroutine' => false, 'max_request' => 0]. Empty values are left out, so a blank
+     * line in .env keeps the config's default.
+     *
+     * @return array<string, mixed>
+     */
+    public static function prefixed(string $prefix): array
+    {
+        $out = [];
+
+        foreach ([...getenv(), ...$_ENV] as $key => $value) {
+            if (!is_string($key) || !str_starts_with($key, $prefix) || $key === $prefix || !is_scalar($value) || (string) $value === '') {
+                continue;
+            }
+
+            $value = self::cast((string) $value);
+            $out[strtolower(substr($key, strlen($prefix)))] = is_string($value) && is_numeric($value)
+                ? (preg_match('/^-?\d+$/', $value) ? (int) $value : (float) $value)
+                : $value;
+        }
+
+        ksort($out);
+
+        return $out;
+    }
+
+    private static function cast(string $value): mixed
+    {
+        return match (strtolower($value)) {
             'true', '(true)' => true,
             'false', '(false)' => false,
             'null', '(null)' => null,

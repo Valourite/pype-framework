@@ -69,6 +69,33 @@ final class DatabaseTest extends TestCase
         $this->assertFalse($this->db->table('items')->where('name', 'ghost')->exists());
     }
 
+    public function test_sqlite_pragmas_from_config_and_their_checks(): void
+    {
+        if (TestDatabase::driver() !== 'sqlite') {
+            $this->markTestSkipped('SQLite only.');
+        }
+
+        $file = tempnam(sys_get_temp_dir(), 'pype');
+        $db = new Connection(['driver' => 'sqlite', 'database' => $file, 'pragmas' => ['busy_timeout' => 1234, 'cache_size' => -64000, 'synchronous' => 'FULL', 'temp_store' => null, 'recursive_triggers' => true]]);
+
+        $this->assertSame(1234, (int) $db->scalar('PRAGMA busy_timeout'));
+        $this->assertSame(-64000, (int) $db->scalar('PRAGMA cache_size'));
+        $this->assertSame(2, (int) $db->scalar('PRAGMA synchronous'));       // FULL
+        $this->assertSame(0, (int) $db->scalar('PRAGMA temp_store'), 'null leaves the default (MEMORY) unset');
+        $this->assertSame(1, (int) $db->scalar('PRAGMA recursive_triggers'));
+        $this->assertSame('wal', $db->scalar('PRAGMA journal_mode'));         // the defaults still apply
+
+        foreach ([['busy_timeout' => '1; DROP TABLE x'], ['bad name' => 1]] as $pragmas) {
+            try {
+                (new Connection(['driver' => 'sqlite', 'database' => $file, 'pragmas' => $pragmas]))->scalar('SELECT 1');
+                $this->fail('should have refused ' . json_encode($pragmas));
+            } catch (\InvalidArgumentException $e) {
+                $this->assertStringContainsString('Invalid SQLite pragma', $e->getMessage());
+            }
+        }
+        @unlink($file);
+    }
+
     public function test_sqlite_transactions_take_the_write_lock_up_front(): void
     {
         if (TestDatabase::driver() !== 'sqlite') {

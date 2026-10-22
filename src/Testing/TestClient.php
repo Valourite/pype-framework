@@ -31,19 +31,30 @@ final class TestClient
         private readonly Application $app,
         private readonly array $headers = [],
         private readonly CookieJar $cookies = new CookieJar(),
+        private readonly string $ip = '127.0.0.1',
     ) {
     }
 
     /** @param array<string, string> $headers */
     public function withHeaders(array $headers): self
     {
-        return new self($this->app, [...$this->headers, ...$headers], $this->cookies);
+        return new self($this->app, [...$this->headers, ...$headers], $this->cookies, $this->ip);
+    }
+
+    /**
+     * A client whose requests come from another address ($request->ip()), e.g. to test a per-IP
+     * Throttle: `$client->withIp('10.0.0.2')->post(...)`. It shares this client's cookies; chain
+     * withoutCookies() for a different visitor altogether.
+     */
+    public function withIp(string $ip): self
+    {
+        return new self($this->app, $this->headers, $this->cookies, $ip);
     }
 
     /** A client with an empty cookie jar of its own: a second browser. */
     public function withoutCookies(): self
     {
-        return new self($this->app, $this->headers, new CookieJar());
+        return new self($this->app, $this->headers, new CookieJar(), $this->ip);
     }
 
     public function cookies(): CookieJar
@@ -82,7 +93,7 @@ final class TestClient
      * validation sends you back). For PUT/PATCH/DELETE add '_method' => 'PATCH' to $fields.
      *
      * @param array<string, mixed> $fields
-     * @param array<string, UploadedFile|list<UploadedFile>> $files
+     * @param array<string, UploadedFile|list<UploadedFile|null>|null> $files  null: a file input left empty
      */
     public function submit(string $page, string $action, array $fields = [], array $files = []): TestResponse
     {
@@ -102,7 +113,11 @@ final class TestClient
         return $this->request('GET', $uri, [], $headers);
     }
 
-    /** @param array<string, UploadedFile|list<UploadedFile>> $files  sends a multipart form, like a browser */
+    /**
+     * @param array<string, UploadedFile|list<UploadedFile|null>|null> $files  sends a multipart form, like a
+     *        browser; null is a file input left empty (['attachments' => [$pdf, null, null]]), which the
+     *        app never sees, exactly as with a real upload
+     */
     public function post(string $uri, array $body = [], array $headers = [], array $files = []): TestResponse
     {
         return $this->request('POST', $uri, $body, $headers, $files);
@@ -131,7 +146,7 @@ final class TestClient
             $headers['Cookie'] = $cookie;
         }
 
-        $request = Request::create($method, $uri, $body, $headers, $files);
+        $request = Request::create($method, $uri, $body, $headers, $files, $this->ip);
         $response = $this->app->handle($request);
         $this->app->terminate($request);   // after-response work runs, as in a real server
         $this->cookies->store($response->cookies());

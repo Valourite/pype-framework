@@ -14,7 +14,12 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.9.1 (2026-10-21): `JsonOutlet::data()` (JSON outlets read the context, like page outlets),
+- **Released:** 0.10.0 (2026-10-22): the Helpdesk load test's fixes (ROADMAP "Found by the Helpdesk
+  load test", H1-H8): `count()` leaves out LEFT JOINs on the joined id, every `SWOOLE_*`/`SQLITE_*` env
+  variable is a setting (`env_prefixed()`), `SWOOLE_MODE` base|process, `max_request` 100,000, the
+  hydrator casts to declared types, `JsonOutlet::with(status:)` and `Page::map()` from `data()`, grouped
+  `where(fn ...)` and `orderByRaw()`, `withIp()`, empty file inputs, `Schedule::load()`.
+  0.9.1 (2026-10-21): `JsonOutlet::data()` (JSON outlets read the context, like page outlets),
   pype's dev pages use stages, docs drop "handlers" (every step is a stage); skeleton has no app/Handlers.
   0.9.0 (2026-10-21): the work list from the expenses app (ROADMAP "Decided with the
   owner": routesIn, stage()/::with(), Requires/Provides + routes:check, pagination links, redirects,
