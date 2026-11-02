@@ -41,7 +41,7 @@ final class Env
         }
     }
 
-    /** Read a variable, casting "true"/"false"/"null"/"empty" to real values. */
+    /** Read a variable, casting "true"/"false" (and on/off, yes/no), "null", "empty" to real values. */
     public static function get(string $key, mixed $default = null): mixed
     {
         $value = $_ENV[$key] ?? getenv($key);
@@ -83,9 +83,10 @@ final class Env
 
     private static function cast(string $value): mixed
     {
-        return match (strtolower($value)) {
-            'true', '(true)' => true,
-            'false', '(false)' => false,
+        // on/off and yes/no too: APP_DEBUG=off must never read as the non-empty string "off" (true).
+        return match (strtolower(trim($value))) {
+            'true', '(true)', 'on', 'yes' => true,
+            'false', '(false)', 'off', 'no' => false,
             'null', '(null)' => null,
             'empty', '(empty)' => '',
             default => $value,

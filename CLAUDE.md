@@ -182,6 +182,10 @@ symlinks this checkout into the app's `vendor/`.
   MySQL's and then can't be dropped ("needed in a foreign key constraint"), so a `down()` that
   drops it fails there. Round-trip migrations (`migrate:fresh` → `migrate:rollback --step=100`
   → `migrate`) on all three databases before trusting a `down()`.
+- **Debug is decided once, in the `Application` constructor** (`safeDebug()`): `APP_ENV` missing or
+  `production` forces `app.debug` false. Anything debug-only must read `config('app.debug')`, never
+  `env('APP_DEBUG')`. The framework's phpunit.xml sets `APP_ENV=testing`, or every test app would be
+  production. `ProductionSafetyTest` guards the dev URLs and error bodies.
 - **Never trust `X-Forwarded-*` from an untrusted peer.** Only `TrustProxies` reads them, only when
   `remoteAddr()` is in the trusted list, and it walks `X-Forwarded-For` right to left (the leftmost
   entries are client-controlled). `TrustProxiesTest` guards this.

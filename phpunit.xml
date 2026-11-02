@@ -9,6 +9,10 @@
             <directory>tests/Unit</directory>
         </testsuite>
     </testsuites>
+    <php>
+        <!-- Without APP_ENV pype assumes production (debug forced off). Tests choose debug per app. -->
+        <env name="APP_ENV" value="testing" force="true"/>
+    </php>
     <source>
         <include>
             <directory>src</directory>

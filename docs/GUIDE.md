@@ -812,14 +812,14 @@ service with a PHP SDK, put a PSR-3 logger class in `log.forward` in `config/log
 example Monolog with a Sentry handler) and raise `LOG_FORWARD_LEVEL` to `warning` so only
 problems are sent. The file is always written too, so the viewer and error page keep working.
 
-**Log viewer:** open `/_pype/logs` while `APP_DEBUG=true` for a live view (new entries appear
+**Log viewer:** open `/_pype/logs` while `APP_DEBUG=true` (and `APP_ENV` isn't production) for a live view (new entries appear
 within a second) with filters for level, request id and text. It's off in production unless you
 enable it and guard it with stages in `config/log.php` (`'stages' => ['web', 'auth', EnsureAdmin::class]`).
 
 **Error page:** with `APP_DEBUG=true`, an unexpected error in the browser shows the exception,
 the code around each line of the trace, the route and its stages, the request (passwords,
 tokens and cookies hidden), and the log lines from that request. API clients still get JSON, and
-production shows a plain error.
+production (`APP_ENV=production` or `APP_DEBUG=false`) shows a plain error.
 
 **Your API's error wording:** pype's own errors (no route, malformed JSON, failed validation,
 unauthenticated, a 500...) can be reworded in `config/app.php` `errors` without touching the
@@ -1112,6 +1112,21 @@ public function test_creating_a_post(): void
   `->expression()` is its cron line (`'0 6 * * *'`), `->overlapMinutes()` its overlap lock.
 
 ## Running in production
+
+**Set `APP_ENV=production`** in the server's `.env`. Production turns debug off whatever
+`APP_DEBUG` says: no error page or traces (errors are `{"error":{"status":500,"message":"Server
+Error"}}`), no log viewer, no dev mailbox, and `db:seed`/`migrate:fresh` need `--force`. A `.env`
+**without** `APP_ENV` counts as production too, so a forgotten line is the safe one; put
+`APP_ENV=local` in your development `.env` (the skeleton's `.env.example` has it).
+`$app->environment()` and `$app->isProduction()` tell your own code. `APP_DEBUG` reads `false`,
+`off`, `no` and `0` as off (before 0.12, `off` and `no` turned debug **on**).
+
+Outside debug, `Application::run()` also turns PHP's `display_errors` off, so a PHP warning (an
+undefined array key...) is logged by PHP instead of being printed into the page with its file path.
+That matters under PHP-FPM without a php.ini (the official Docker `php` images): PHP's own default
+is to print them. OpenSwoole prints them to the server's console, never into a response. A parse
+error in a file loaded before `run()` (bootstrap, config) is still PHP's to show: use
+`php.ini-production` on servers.
 
 The default is nothing special: point nginx (or Apache) at `public/` with PHP-FPM. On each
 deploy, after `composer install --no-dev --classmap-authoritative`, run:

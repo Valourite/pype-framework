@@ -143,7 +143,12 @@ final class Console
     private function mailNotice(string $address): void
     {
         $mailbox = $this->app->router->named('pype.mail');
-        $where = $mailbox === null ? 'in the log (/_pype/logs)' : "at http://{$address}{$mailbox->path()}";
+        $logs = $this->app->router->named('pype.logs');
+        $where = match (true) {
+            $mailbox !== null => "at http://{$address}{$mailbox->path()}",
+            $logs !== null => "in the log ({$logs->path()})",
+            default => 'in the log (' . $this->app->config('log.path', 'storage/logs') . ')',
+        };
 
         if ($this->app->config('mail.driver', 'log') === 'log') {
             echo "Mail: MAIL_DRIVER=log, so nothing is delivered. Read what was sent {$where}.\n";

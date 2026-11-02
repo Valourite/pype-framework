@@ -58,8 +58,12 @@ two named below without asking).
    `TRUSTED_PROXIES` (IPs, CIDRs, IPv4/IPv6, `*` = any peer); right-to-left walk; the result is a
    `ForwardedClient` in the context that `Request::ip()`/`scheme()`/`host()`/`isSecure()` read, so
    Throttle and the request log use it. First in the skeleton's global stages, empty list.
-2. Production safety check: the error page and `/_pype/logs` under `APP_ENV=production` /
-   `APP_DEBUG=false`, PHP-FPM and OpenSwoole; tests that prove it.
+2. **Production safety check** — done. Checked on real php-fpm (with and without a php.ini) and
+   Swoole: dev URLs 404 and 500s generic, the `optimize` cache can't bring the viewer back. Found and
+   fixed: `APP_ENV` didn't exist (now: production, or missing, forces debug off; owner chose
+   missing = production); `APP_DEBUG=off`/`no` meant debug **on** (`Env` casts on/off, yes/no, trims);
+   PHP warnings printed paths into FPM responses without a php.ini (`run()` sets `display_errors=0`
+   outside debug); `serve` pointed at `/_pype/logs` when it wasn't registered.
 3. `Schedule\Cron` delegates to `dragonmantank/cron-expression` (API unchanged; DST/timezone tests).
 4. `Auth\Jwt` on `lcobucci/jwt` or `firebase/php-jwt` (API, config and security properties unchanged).
 5. Security review (report only) of Session, VerifyCsrfToken, SessionGuard, RememberTokens,

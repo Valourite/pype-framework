@@ -146,6 +146,14 @@ after `add()`, by the chained `->name()`). Two routes with the same name are an 
   log lines through `LogReader::forRequest()`. Secrets are hidden: Authorization/Cookie headers,
   cookie values, and input fields named like pass/token/secret/key/card.
 
+**Debug is off in production, whatever `APP_DEBUG` says.** The `Application` constructor works out
+`app.debug` once: `app.env` (else `APP_ENV`, else `production` when missing) of `production`/`prod`
+forces it false, otherwise `filter_var(..., FILTER_VALIDATE_BOOL)` of the configured value. Everything
+debug-only (error page, debug JSON, log viewer and mailbox registration, `db:seed` guards) reads
+`app.debug`, so one place decides. `run()` sets `display_errors=0` outside debug (PHP-FPM; OpenSwoole
+prints warnings to its console). `ProductionSafetyTest` proves the dev URLs are 404 and 500s say
+only "Server Error" through both `handle()` and `SwooleServer::handle()`.
+
 **pype's own error wording:** framework throw sites mark their `HttpException` with a stable
 key (`withKey('no_route')`, `bad_json`, `validation`, `unauthenticated`, `invalid_token`, ...;
 listed in the skeleton's `config/app.php`), never in the shared factories, so an app's own

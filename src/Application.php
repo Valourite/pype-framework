@@ -22,6 +22,7 @@ use Pype\Routing\RouteCheck;
 use Pype\Routing\Router;
 use Pype\Routing\Urls;
 use Pype\Security\Encrypter;
+use Pype\Support\Env;
 use Throwable;
 
 /**
@@ -58,13 +59,16 @@ final class Application
     /** @var array<string, array{0: string, 1: string|Closure}> */
     private array $commands = [];
 
+    private readonly array $config;
+
     /**
      * @param array<string, mixed> $config  keyed by file name: ['app' => [...], 'database' => [...]]
      */
     public function __construct(
         public readonly string $basePath,
-        private readonly array $config = [],
+        array $config = [],
     ) {
+        $this->config = self::safeDebug($config);
         $this->container = new Container();
         $this->router = new Router();
 
@@ -88,6 +92,43 @@ final class Application
         foreach ($this->config('app.providers', []) as $provider) {
             $this->register($provider);
         }
+    }
+
+    /**
+     * The environment: app.env, else APP_ENV, else 'production'. Missing means production on
+     * purpose, so a forgotten setting can't turn the error page or the log viewer on.
+     */
+    public function environment(): string
+    {
+        return (string) $this->config['app']['env'];
+    }
+
+    public function isProduction(): bool
+    {
+        return self::isProductionName($this->environment());
+    }
+
+    /**
+     * app.debug as every part of pype reads it: false in production whatever APP_DEBUG says
+     * (error page, debug JSON, log viewer, mailbox, db:seed guards).
+     *
+     * @param array<string, mixed> $config
+     * @return array<string, mixed>
+     */
+    private static function safeDebug(array $config): array
+    {
+        $app = (array) ($config['app'] ?? []);
+        $env = trim((string) ($app['env'] ?? Env::get('APP_ENV') ?? '')) ?: 'production';
+        $app['env'] = $env;
+        $app['debug'] = !self::isProductionName($env) && filter_var($app['debug'] ?? false, FILTER_VALIDATE_BOOL);
+        $config['app'] = $app;
+
+        return $config;
+    }
+
+    private static function isProductionName(string $env): bool
+    {
+        return in_array(strtolower($env), ['production', 'prod'], true);
     }
 
     /** Load every config/*.php file into an array keyed by file name. */
@@ -329,6 +370,12 @@ final class Application
 
     public function run(): void
     {
+        // PHP prints warnings into the response when display_errors is on (its default without a
+        // php.ini, as in the official Docker images): file paths and values. Outside debug, only log them.
+        if (!$this->config('app.debug')) {
+            ini_set('display_errors', '0');
+        }
+
         $request = Request::fromGlobals();
 
         $this->handle($request)->send($request);
