@@ -48,6 +48,23 @@ anything big.
 - **0.4.0**: logging (PSR-3 `Logger`, JSON lines, request log, forwarding to stderr/syslog/any PSR-3 logger), the live log viewer, the
   development error page, `HtmlOutlet`.
 
+## Hardening round (2026-11-02, the owner's list; one commit per task, release at the end)
+
+Goal: less long-term risk. Security-sensitive pieces get hardened or move to well-established
+packages; everything else stays in-house and the dependency list stays short (no package beyond the
+two named below without asking).
+
+1. **`TrustProxies` stage** — done. Real client IP/scheme/host from `X-Forwarded-*`, only from
+   `TRUSTED_PROXIES` (IPs, CIDRs, IPv4/IPv6, `*` = any peer); right-to-left walk; the result is a
+   `ForwardedClient` in the context that `Request::ip()`/`scheme()`/`host()`/`isSecure()` read, so
+   Throttle and the request log use it. First in the skeleton's global stages, empty list.
+2. Production safety check: the error page and `/_pype/logs` under `APP_ENV=production` /
+   `APP_DEBUG=false`, PHP-FPM and OpenSwoole; tests that prove it.
+3. `Schedule\Cron` delegates to `dragonmantank/cron-expression` (API unchanged; DST/timezone tests).
+4. `Auth\Jwt` on `lcobucci/jwt` or `firebase/php-jwt` (API, config and security properties unchanged).
+5. Security review (report only) of Session, VerifyCsrfToken, SessionGuard, RememberTokens,
+   PasswordResets, Auth against the OWASP cheat sheets.
+
 ## Next: not decided
 
 Pick the next round from Tier 2 / the follow-ups below with the owner.

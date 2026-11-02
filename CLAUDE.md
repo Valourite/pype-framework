@@ -76,7 +76,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 | `src/Application.php` | lifecycle: config, providers, global stages, `handle()`, error rendering |
 | `src/Pipeline/` | `Stage` interface, `Pipeline`, `Invoker` (fills closure/invokable params by type and name) |
 | `src/Routing/` | `Router` (groups, named stacks, outlet hoisting in `compile()`, fast matching + `optimize` cache), `Route` |
-| `src/Http/` | `Request`, `Response`, `Context`, `Cookie`, `UploadedFile`, `Responsable` |
+| `src/Http/` | `Request`, `Response`, `Context`, `Cookie`, `UploadedFile`, `Responsable`, `ForwardedClient` |
 | `src/Outlet/` | `Outlet` (abstract stage), `JsonOutlet`, `FileOutlet` |
 | `src/View/` | plain-PHP templates: `View`, `ViewOutlet` (class-based views), `Template`, `Views` |
 | `src/Validation/` | `Validator` (rules), `Validate` stage, `ValidatedInput` |
@@ -87,7 +87,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 | `src/Queue/` | `Queue` + database/sync/array drivers, `QueuedJob`, `Worker` (`queue:work`), `FailedJobs`, `QueueProvider` |
 | `src/Schedule/` | `Schedule` (routes/schedule.php), `Task` (frequency helpers, locks), `Cron` (own parser) |
 | `src/RateLimit/` | `RateLimiter` + database/apcu/array drivers (used by `Stages\Throttle`) |
-| `src/Stages/` | built-in stages: Cors, JsonBody, MethodOverride, RequestId, Throttle |
+| `src/Stages/` | built-in stages: Cors, JsonBody, MethodOverride, RequestId, Throttle, TrimStrings, TrustProxies |
 | `src/Log/` | `Logger` (PSR-3, JSON lines), `LogReader`, `LogRequests`, `LogReporter`, `LogViewer` + `views/viewer.php`, `LogProvider` |
 | `src/Security/` | `Encrypter` (libsodium) |
 | `src/Mail/` | `Message`, `Mail`, `Mailer`, `Transport` + PHPMailer/log/array/null transports, `MailProvider` |
@@ -182,6 +182,9 @@ symlinks this checkout into the app's `vendor/`.
   MySQL's and then can't be dropped ("needed in a foreign key constraint"), so a `down()` that
   drops it fails there. Round-trip migrations (`migrate:fresh` → `migrate:rollback --step=100`
   → `migrate`) on all three databases before trusting a `down()`.
+- **Never trust `X-Forwarded-*` from an untrusted peer.** Only `TrustProxies` reads them, only when
+  `remoteAddr()` is in the trusted list, and it walks `X-Forwarded-For` right to left (the leftmost
+  entries are client-controlled). `TrustProxiesTest` guards this.
 - **JWT: the algorithm comes from the configured key, never from the token's header.** Keep it
   that way (`Jwt::verify()`), or `alg: none` / RS-to-HS key confusion become possible.
 - `QueryBuilder::$quoted` is a process-wide memo of quoted identifiers: keep the cap, and only

@@ -55,6 +55,7 @@ final class LogRequests implements Stage, ContainerAware
                 'status' => $status,
                 'ms' => $ms,
                 'route' => $request->context()->find(Route::class)?->name(),
+                'ip' => $request->ip(),   // after the stages ran, so TrustProxies' answer when it's used
             ], static fn ($v) => $v !== null),
         );
 

@@ -49,7 +49,7 @@ final class FlashValidationErrors implements Stage
         $referer = (string) $request->header('referer');
         $parts = parse_url($referer);
 
-        if ($referer === '' || $parts === false || ($parts['host'] ?? null) !== parse_url('//' . $request->header('host', ''), PHP_URL_HOST)) {
+        if ($referer === '' || $parts === false || $request->host() === '' || strtolower($parts['host'] ?? '') !== $request->host()) {
             return $this->fallback;
         }
 

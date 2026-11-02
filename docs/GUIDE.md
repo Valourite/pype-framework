@@ -255,6 +255,7 @@ $ php bin/pype routes:check
 | `Validate::with([...rules])`          | 422 on bad input; `ValidatedInput` injected on success (see Validation) |
 | `Pype\Cache\Cache`                 | `remember`, locks, background refresh, groups; file, APCu or database (see Cache) |
 | `Pype\Queue\Queue`                 | background jobs: `push`, `later`, retries, `queue:work` (see Queue); `routes/schedule.php` for cron tasks |
+| `new TrustProxies()` (global)       | behind a proxy/load balancer: real client IP, scheme and host from `X-Forwarded-*`, only from `TRUSTED_PROXIES` (see Running in production) |
 | `new TrimStrings()` (global)        | trims string input before validation (passwords left alone)             |
 | `new RequestId()`                   | `X-Request-Id` on every response                                        |
 | `new Cors([...origins])`            | CORS headers + preflight                                                |
@@ -1166,6 +1167,41 @@ held:
   keep-alive connections close with it (a proxy retries a GET, but a POST caught on one fails with a
   502: 20 a minute with recycling forced every 20,000 requests at 2,000 req/s), and when it's busy new
   connections wait on it until the proxy times out.
+
+### Behind a proxy or load balancer
+
+Behind nginx, a load balancer or a platform router, the address that connects to PHP is the
+proxy's, so every client would share one IP: one `Throttle` counter for everybody, and the proxy's
+address in the logs. The `TrustProxies` stage (first in the skeleton's global stages) fixes that, but
+only for proxies you list in `.env`:
+
+```bash
+TRUSTED_PROXIES=127.0.0.1,10.0.0.0/8,fd00::/8   # IPv4/IPv6 addresses and CIDR ranges, comma-separated
+```
+
+- A request from a listed proxy: `X-Forwarded-For` is read **from right to left**, skipping your
+  proxies; the first address that isn't one is the client (`$request->ip()`). Entries before it were
+  sent by the client and are ignored, so `X-Forwarded-For: 1.2.3.4` from a browser changes nothing.
+  `X-Forwarded-Proto` (`http`/`https`) and `X-Forwarded-Host` come from the last value, the one your
+  nearest proxy set; anything else is ignored.
+- A request from anyone else: the `X-Forwarded-*` headers are ignored, `ip()` is the connecting address.
+- Empty (the default): the stage does nothing.
+- `*` trusts whatever address connected (platforms whose load balancer IPs change, e.g. Heroku,
+  Render, Fly). Only use it when **nothing but the proxy can reach the app**: if the app's port is
+  reachable directly, anyone can set `X-Forwarded-For` and pick the IP they're throttled and logged
+  as. `*` still doesn't trust the hops listed inside `X-Forwarded-For` (add their ranges for that).
+
+Your proxy must **set or append** `X-Forwarded-For` (nginx: `proxy_set_header X-Forwarded-For
+$proxy_add_x_forwarded_for;`, plus `X-Forwarded-Proto $scheme` and `X-Forwarded-Host $host`).
+
+The answer is put in the request context (`Pype\Http\ForwardedClient`), and `$request->ip()`,
+`scheme()`, `host()` (lower-cased, no port) and `isSecure()` read it, so every stage sees the same
+client, including `Throttle`, the request log (`ip` on each line) and the error page, even those
+listed before `TrustProxies`. `$request->remoteAddr()` is always the address that connected. A list
+of its own instead of the config: `TrustProxies::with(['10.0.0.0/8'])`. An invalid entry stops the
+app at boot with the entry in the message. The same applies under PHP-FPM and OpenSwoole.
+
+### Long-running workers
 
 Workers handle one request at a time, so your code runs exactly as under PHP-FPM. Two
 differences: code changes need a restart, and anything you store in a static variable or

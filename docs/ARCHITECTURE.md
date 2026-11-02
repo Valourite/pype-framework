@@ -56,6 +56,16 @@ maps your own exception types.
 signed-in user, validated input, loaded models). It is the only place per-request state should
 live.
 
+### The client behind a proxy
+
+`Request::ip()`, `scheme()`, `host()` and `isSecure()` read a `Http\ForwardedClient` from the
+context when there is one, otherwise the connection's own values (`remoteAddr()`, `HTTPS`, the Host
+header). Only `Stages\TrustProxies` puts it there, and only when `remoteAddr()` is a trusted proxy
+(`app.trusted_proxies`, IPs/CIDRs matched on `inet_pton` bytes; `*` = any peer). `X-Forwarded-For` is
+walked right to left skipping trusted hops; proto and host take the last value. Because the
+context is shared by every copy of the request, stages outside it (`LogRequests`, registered first)
+and the container-bound request (logger, error page) see the resolved client too.
+
 ## Outlets
 
 An `Outlet` is a stage that runs the rest of the pipeline, then claims the response

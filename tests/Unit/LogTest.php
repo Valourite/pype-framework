@@ -12,6 +12,7 @@ use Pype\Log\LogProvider;
 use Pype\Log\LogReader;
 use Pype\Log\Logger;
 use Pype\Stages\RequestId;
+use Pype\Stages\TrustProxies;
 use Pype\Testing\TestClient;
 
 final class LogTest extends TestCase
@@ -91,6 +92,19 @@ final class LogTest extends TestCase
         $this->assertSame('things.show', $lines[1]['context']['route']);
         $this->assertSame($res->header('X-Request-Id'), $lines[0]['request_id']);
         $this->assertSame($lines[0]['request_id'], $lines[1]['request_id']);
+    }
+
+    public function test_the_request_line_has_the_client_ip_a_trusted_proxy_forwarded(): void
+    {
+        // LogRequests is registered first (outermost), TrustProxies later: the line still gets the client.
+        $app = $this->app();
+        $app->through(new TrustProxies(['10.0.0.1']));
+        $app->router->get('/x', fn () => 'ok');
+
+        (new TestClient($app))->withIp('10.0.0.1')->get('/x', ['X-Forwarded-For' => '6.6.6.6, 198.51.100.7']);
+        (new TestClient($app))->withIp('203.0.113.5')->get('/x', ['X-Forwarded-For' => '198.51.100.7']);
+
+        $this->assertSame(['198.51.100.7', '203.0.113.5'], array_map(fn ($l) => $l['context']['ip'], $this->lines()));
     }
 
     public function test_unexpected_errors_are_logged(): void

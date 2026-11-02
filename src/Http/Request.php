@@ -36,6 +36,7 @@ final class Request
         private readonly array $cookies = [],
         private readonly array $files = [],
         ?Context $context = null,
+        private readonly bool $secure = false,
     ) {
         $this->context = $context ?? new Context();
     }
@@ -78,7 +79,8 @@ final class Request
             $headers['content-type'] ??= 'application/json';
         }
 
-        return new self(strtoupper($method), $parts['path'] ?? '/', $query, $body, $headers, $raw, $ip, self::parseCookies($headers['cookie'] ?? ''), $files);
+        return new self(strtoupper($method), $parts['path'] ?? '/', $query, $body, $headers, $raw, $ip,
+            self::parseCookies($headers['cookie'] ?? ''), $files, secure: strtolower($parts['scheme'] ?? '') === 'https');
     }
 
     public static function fromGlobals(): self
@@ -107,6 +109,7 @@ final class Request
             ip: (string) ($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1'),
             cookies: array_filter($_COOKIE, 'is_string'),
             files: self::normaliseFiles($_FILES),
+            secure: !in_array(strtolower((string) ($_SERVER['HTTPS'] ?? '')), ['', 'off'], true),
         );
     }
 
@@ -188,7 +191,7 @@ final class Request
     public function withInput(?array $body = null, ?array $query = null): self
     {
         $clone = new self($this->method, $this->path, $query ?? $this->query, $body ?? $this->body, $this->headers,
-            $this->rawBody, $this->ip, $this->cookies, $this->files, $this->context);
+            $this->rawBody, $this->ip, $this->cookies, $this->files, $this->context, $this->secure);
         $clone->params = $this->params;
 
         return $clone;
@@ -268,12 +271,42 @@ final class Request
     }
 
     /**
-     * Client IP as seen by PHP. Behind a proxy/load balancer this is the proxy's address;
-     * resolve X-Forwarded-For in a stage that knows which proxies you trust.
+     * The client's IP. Behind a proxy that Stages\TrustProxies trusts, the address it forwarded;
+     * otherwise the address that connected (remoteAddr()).
      */
     public function ip(): string
     {
+        return $this->context->find(ForwardedClient::class)?->ip ?? $this->ip;
+    }
+
+    /** The address that connected (REMOTE_ADDR): the proxy's, behind one. */
+    public function remoteAddr(): string
+    {
         return $this->ip;
+    }
+
+    /** 'https' or 'http', as the client used it (a trusted proxy's X-Forwarded-Proto wins). */
+    public function scheme(): string
+    {
+        return $this->context->find(ForwardedClient::class)?->scheme ?? ($this->secure ? 'https' : 'http');
+    }
+
+    public function isSecure(): bool
+    {
+        return $this->scheme() === 'https';
+    }
+
+    /** The host name the client asked for, lower-cased, without the port ('' when unknown). */
+    public function host(): string
+    {
+        $forwarded = $this->context->find(ForwardedClient::class)?->host;
+        if ($forwarded !== null) {
+            return $forwarded;
+        }
+
+        $host = strtolower((string) $this->header('host', ''));
+
+        return str_starts_with($host, '[') ? substr($host, 0, (int) strpos($host, ']') + 1) : explode(':', $host)[0];
     }
 
     public function rawBody(): string
