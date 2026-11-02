@@ -4,16 +4,36 @@ declare(strict_types=1);
 
 namespace Pype\Auth;
 
+use DateInterval;
+use DateTimeImmutable;
+use Lcobucci\JWT\Encoding\ChainedFormatter;
+use Lcobucci\JWT\Encoding\JoseEncoder;
+use Lcobucci\JWT\Signer;
+use Lcobucci\JWT\Signer\InvalidKeyProvided;
+use Lcobucci\JWT\Signer\Key\InMemory;
+use Lcobucci\JWT\Token\Builder;
+use Lcobucci\JWT\Token\Parser;
+use Lcobucci\JWT\Token\Plain;
+use Lcobucci\JWT\Validation\Constraint\IssuedBy;
+use Lcobucci\JWT\Validation\Constraint\LooseValidAt;
+use Lcobucci\JWT\Validation\Constraint\PermittedFor;
+use Lcobucci\JWT\Validation\Constraint\SignedWith;
+use Lcobucci\JWT\Validation\Validator;
+use Psr\Clock\ClockInterface;
+use Throwable;
+
 /**
- * JSON Web Tokens, signed HS256 (a shared secret) or RS256 (an RSA key pair), with PHP's own
- * hash_hmac / openssl. Configured in config/auth.php under 'jwt'.
+ * JSON Web Tokens, signed HS256 (a shared secret of 32+ bytes) or RS256 (an RSA key pair of
+ * 2048+ bits), by lcobucci/jwt (`composer require lcobucci/jwt`). Configured in config/auth.php
+ * under 'jwt'.
  *
  *   $token = $jwt->issue(['sub' => (string) $user->id]);   // adds iat and exp (ttl seconds)
  *   $claims = $jwt->verify($token);                         // or throws InvalidToken
  *
  * Which algorithms are accepted follows from the configured keys, never from the token: a
- * secret allows HS256, a public key allows RS256. So `alg: none`, and an RS256 public key used
- * as an HMAC secret (algorithm confusion), are rejected.
+ * secret allows HS256, a public key allows RS256. The header's alg only picks between those
+ * (and the error message), so `alg: none`, and an RS256 public key used as an HMAC secret
+ * (algorithm confusion), are rejected. exp is required; nbf, iat and exp allow `leeway`.
  */
 final class Jwt
 {
@@ -29,6 +49,9 @@ final class Jwt
      */
     public function __construct(private readonly array $config, private readonly ?\Closure $now = null)
     {
+        if (!class_exists(Builder::class)) {
+            throw new \LogicException('JWTs need lcobucci/jwt. Run: composer require lcobucci/jwt');
+        }
         $this->secret = (string) ($config['secret'] ?? '');
         $public = $config['public_key'] ?? null;
         $this->publicKeys = is_array($public) ? $public : ($public === null || $public === '' ? [] : ['' => $public]);
@@ -51,22 +74,35 @@ final class Jwt
         }
 
         $private = $this->config['private_key'] ?? null;
-        $header = ['alg' => $private ? 'RS256' : 'HS256', 'typ' => 'JWT'];
+        $builder = Builder::new(new JoseEncoder(), ChainedFormatter::default());
 
         if ($private && ($this->config['kid'] ?? null) !== null) {
-            $header['kid'] = $this->config['kid'];
+            $builder = $builder->withHeader('kid', $this->config['kid']);
         }
 
-        $input = self::encode(json_encode($header, JSON_THROW_ON_ERROR)) . '.' . self::encode(json_encode($claims, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
-
-        if ($private) {
-            $key = openssl_pkey_get_private($private) ?: throw new \RuntimeException('auth.jwt.private_key is not a valid private key.');
-            openssl_sign($input, $signature, $key, OPENSSL_ALGO_SHA256) ?: throw new \RuntimeException('Signing the JWT failed.');
-        } else {
-            $signature = hash_hmac('sha256', $input, $this->secret !== '' ? $this->secret : throw new \RuntimeException('auth.jwt.secret is not set.'), true);
+        // Registered claims go through their own builder methods (the builder refuses them as plain claims).
+        foreach ($claims as $name => $value) {
+            $builder = match ($name) {
+                'iss' => $builder->issuedBy((string) $value),
+                'sub' => $builder->relatedTo((string) $value),
+                'aud' => $builder->permittedFor(...array_map('strval', (array) $value)),
+                'jti' => $builder->identifiedBy((string) $value),
+                'iat' => $builder->issuedAt(self::time($value)),
+                'nbf' => $builder->canOnlyBeUsedAfter(self::time($value)),
+                'exp' => $builder->expiresAt(self::time($value)),
+                default => $builder->withClaim((string) $name, $value),
+            };
         }
 
-        return $input . '.' . self::encode($signature);
+        [$signer, $key] = $private
+            ? [new Signer\Rsa\Sha256(), self::key($private, 'auth.jwt.private_key is not a valid private key.')]
+            : [new Signer\Hmac\Sha256(), $this->hmacKey()];
+
+        try {
+            return $builder->getToken($signer, $key)->toString();
+        } catch (InvalidKeyProvided $e) {
+            throw new \RuntimeException('auth.jwt.private_key: ' . $e->getMessage(), 0, $e);
+        }
     }
 
     /**
@@ -83,32 +119,40 @@ final class Jwt
             throw new InvalidToken('Not a JWT.');
         }
 
-        [$head, $body, $sig] = $parts;
-        $header = self::json($head);
-        $claims = self::json($body);
+        $header = self::json($parts[0]);
+        $claims = self::json($parts[1]);
 
         if ($header === null || $claims === null) {
             throw new InvalidToken('Malformed JWT.');
         }
 
-        $input = "{$head}.{$body}";
-        $signature = self::decode($sig) ?? '';   // empty or not base64url: fails the check below
-        $valid = match ($header['alg'] ?? null) {
-            'HS256' => $this->secret !== '' && hash_equals(hash_hmac('sha256', $input, $this->secret, true), $signature),
-            'RS256' => $this->verifyRsa($input, $signature, $header),
+        // The configured keys decide what's allowed; the header only picks among them.
+        [$signer, $key] = match ($header['alg'] ?? null) {
+            'HS256' => $this->secret !== '' ? [new Signer\Hmac\Sha256(), $this->hmacKey()] : [null, null],
+            'RS256' => [new Signer\Rsa\Sha256(), $this->publicKey($header)],
             default => throw new InvalidToken('Algorithm not accepted.'),
         };
 
-        if (!$valid) {
+        try {
+            $parsed = (new Parser(new JoseEncoder()))->parse($token);
+        } catch (Throwable) {
+            $parsed = null;
+        }
+
+        if (!$parsed instanceof Plain) {
+            throw new InvalidToken('Malformed JWT.');
+        }
+
+        if ($signer === null || !$this->passes($parsed, new SignedWith($signer, $key))) {
             throw new InvalidToken('Bad signature.');
         }
 
-        $this->checkClaims($claims);
+        $this->checkClaims($parsed);
 
         return $claims;
     }
 
-    private function verifyRsa(string $input, string $signature, array $header): bool
+    private function publicKey(array $header): InMemory
     {
         if ($this->publicKeys === []) {
             throw new InvalidToken('Algorithm not accepted.');   // no public key: RS256 is off
@@ -117,35 +161,85 @@ final class Jwt
         $kid = $header['kid'] ?? null;
         $pem = is_string($kid) && isset($this->publicKeys[$kid]) ? $this->publicKeys[$kid]
             : (count($this->publicKeys) === 1 ? array_values($this->publicKeys)[0] : throw new InvalidToken('Unknown key id.'));
-        $key = openssl_pkey_get_public($pem) ?: throw new \RuntimeException('auth.jwt.public_key is not a valid public key.');
 
-        return openssl_verify($input, $signature, $key, OPENSSL_ALGO_SHA256) === 1;
+        return self::key($pem, 'auth.jwt.public_key is not a valid public key.');
     }
 
-    private function checkClaims(array $claims): void
+    private function hmacKey(): InMemory
     {
-        $now = $this->now();
-        $leeway = (int) ($this->config['leeway'] ?? 30);
+        if ($this->secret === '') {
+            throw new \RuntimeException('auth.jwt.secret is not set.');
+        }
+        if (strlen($this->secret) < 32) {
+            // RFC 7518 3.2: an HS256 key must be at least 256 bits. lcobucci refuses shorter ones too.
+            throw new \RuntimeException('auth.jwt.secret must be at least 32 bytes: php -r \'echo bin2hex(random_bytes(32));\'');
+        }
 
-        if (!isset($claims['exp']) || !is_numeric($claims['exp'])) {
+        return InMemory::plainText($this->secret);
+    }
+
+    private function checkClaims(Plain $token): void
+    {
+        $now = new DateTimeImmutable('@' . $this->now());
+        $leeway = new DateInterval('PT' . max(0, (int) ($this->config['leeway'] ?? 30)) . 'S');
+
+        if (!$token->claims()->has('exp')) {
             throw new InvalidToken('No expiry.');
         }
 
-        if ($now - $leeway >= (int) $claims['exp']) {
+        if ($token->isExpired($now->sub($leeway))) {
             throw new InvalidToken('Expired.');
         }
 
-        if (isset($claims['nbf']) && (!is_numeric($claims['nbf']) || $now + $leeway < (int) $claims['nbf'])) {
-            throw new InvalidToken('Not valid yet.');
+        if (!$this->passes($token, new LooseValidAt($this->clock($now), $leeway))) {
+            throw new InvalidToken('Not valid yet.');   // nbf (or iat) later than now + leeway
         }
 
-        if (($issuer = $this->config['issuer'] ?? null) !== null && ($claims['iss'] ?? null) !== $issuer) {
+        if (($issuer = $this->config['issuer'] ?? null) !== null && !$this->passes($token, new IssuedBy($issuer))) {
             throw new InvalidToken('Wrong issuer.');
         }
 
-        if (($audience = $this->config['audience'] ?? null) !== null && !in_array($audience, (array) ($claims['aud'] ?? []), true)) {
+        if (($audience = $this->config['audience'] ?? null) !== null && !$this->passes($token, new PermittedFor($audience))) {
             throw new InvalidToken('Wrong audience.');
         }
+    }
+
+    private function passes(Plain $token, \Lcobucci\JWT\Validation\Constraint $constraint): bool
+    {
+        try {
+            return (new Validator())->validate($token, $constraint);
+        } catch (InvalidKeyProvided $e) {
+            throw new \RuntimeException('auth.jwt key: ' . $e->getMessage(), 0, $e);
+        }
+    }
+
+    private static function key(string $pem, string $error): InMemory
+    {
+        try {
+            return InMemory::plainText($pem);
+        } catch (Throwable) {
+            throw new \RuntimeException($error);
+        }
+    }
+
+    private static function time(mixed $value): DateTimeImmutable
+    {
+        return new DateTimeImmutable('@' . (int) $value);
+    }
+
+    /** Time as this Jwt sees it (the injectable $now), for lcobucci's constraints. */
+    private function clock(DateTimeImmutable $now): ClockInterface
+    {
+        return new class ($now) implements ClockInterface {
+            public function __construct(private readonly DateTimeImmutable $now)
+            {
+            }
+
+            public function now(): DateTimeImmutable
+            {
+                return $this->now;
+            }
+        };
     }
 
     /** @return array<string, mixed>|null */
@@ -155,11 +249,6 @@ final class Jwt
         $data = $raw === null ? null : json_decode($raw, true);
 
         return is_array($data) && !array_is_list($data) ? $data : null;
-    }
-
-    private static function encode(string $raw): string
-    {
-        return rtrim(strtr(base64_encode($raw), '+/', '-_'), '=');
     }
 
     private static function decode(string $part): ?string

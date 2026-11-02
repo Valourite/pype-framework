@@ -16,13 +16,15 @@
         "ext-apcu": "In-memory cache and rate limit counters (CACHE_DRIVER=apcu, RATE_LIMIT_DRIVER=apcu)",
         "phpmailer/phpmailer": "Send mail over SMTP, sendmail or mail() (MAIL_DRIVER=smtp|sendmail|mail)",
         "latte/latte": "Write views as .latte templates (the View outlet picks the engine from the file extension)",
-        "eftec/bladeone": "Write views as .blade.php templates (Blade syntax, no dependencies)"
+        "eftec/bladeone": "Write views as .blade.php templates (Blade syntax, no dependencies)",
+        "lcobucci/jwt": "JSON Web Tokens: Pype\\Auth\\Jwt and JwtGuard (HS256/RS256)"
     },
     "require-dev": {
         "phpunit/phpunit": "^11",
         "phpmailer/phpmailer": "^7.0",
         "latte/latte": "^3.1",
-        "eftec/bladeone": "^5.0"
+        "eftec/bladeone": "^5.0",
+        "lcobucci/jwt": "^5.6"
     },
     "autoload": {
         "psr-4": {

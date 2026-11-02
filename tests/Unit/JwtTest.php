@@ -75,9 +75,9 @@ final class JwtTest extends TestCase
     {
         // Built by hand with openssl's HMAC, like the challenge's test suite and jwt.io do.
         $input = self::b64('{"alg":"HS256","typ":"JWT"}') . '.' . self::b64('{"sub":"1","exp":1900000000}');
-        $token = $input . '.' . self::b64(hash_hmac('sha256', $input, 'twelve-dollar-challenge', true));
+        $token = $input . '.' . self::b64(hash_hmac('sha256', $input, 'twelve-dollar-challenge-but-32-bytes', true));
 
-        $this->assertSame('1', $this->jwt(['secret' => 'twelve-dollar-challenge'])->verify($token)['sub']);
+        $this->assertSame('1', $this->jwt(['secret' => 'twelve-dollar-challenge-but-32-bytes'])->verify($token)['sub']);
     }
 
     public function test_rs256_round_trip_and_key_ids(): void
@@ -100,7 +100,7 @@ final class JwtTest extends TestCase
 
         $this->rejects($jwt, $h . '.' . self::b64(json_encode(['sub' => '1', 'exp' => $this->time + 60])) . '.' . $s, 'Bad signature.');
         $this->rejects($jwt, "{$h}.{$p}." . self::b64('nope'), 'Bad signature.');
-        $this->rejects($this->jwt(['secret' => 'another-secret']), $token, 'Bad signature.');
+        $this->rejects($this->jwt(['secret' => 'another-secret-that-is-long-enough']), $token, 'Bad signature.');
         $this->rejects($jwt, self::forge(['alg' => 'none'], ['sub' => '1', 'exp' => $this->time + 60]), 'Algorithm not accepted.');
         $this->rejects($jwt, self::forge(['alg' => 'HS512'], ['sub' => '1', 'exp' => $this->time + 60], 'x'), 'Algorithm not accepted.');
         $this->rejects($jwt, 'abc', 'Not a JWT.');

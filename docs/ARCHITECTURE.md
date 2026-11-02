@@ -280,12 +280,18 @@ copy: all of the user's tokens are deleted. Cookies the guard needs to set trave
 `Session` object (`queueCookie()`), and `StartSession` adds them to the response. Logout and
 password resets revoke them.
 
-JWT (`Auth\Jwt`, `Auth\JwtGuard`; bound by `AuthProvider`, built only when used): HS256 with
-`hash_hmac`/`hash_equals`, RS256 with `openssl_sign`/`openssl_verify`. **The accepted algorithm
-follows from the configured keys, never from the token's header**: a secret allows HS256, a
-public key allows RS256, so `alg: none` and an RS256 public key used as an HMAC secret fail.
-`exp` is required; `nbf` and `exp` allow `leeway`; `iss`/`aud` are checked when configured;
-`kid` picks among several public keys. The guard returns null for non-JWT bearer tokens (no
+JWT (`Auth\Jwt`, `Auth\JwtGuard`; bound by `AuthProvider`, built only when used): signing,
+parsing and the claim checks are lcobucci/jwt's (an optional package, like PHPMailer: `suggest`,
+a clear error when missing). `issue()` uses its `Builder` (registered claims through their own
+methods, the rest `withClaim()`); `verify()` decodes header and payload itself, then **picks the
+signer and key from the configuration, never from the token's header**: a secret allows HS256, a
+public key allows RS256 (`kid` picks among several), anything else is "Algorithm not accepted", so
+`alg: none` and an RS256 public key used as an HMAC secret fail. The header's `alg` only chooses
+between the configured pairs. Then lcobucci's `Parser` and `SignedWith`, pype's own "`exp` is
+required" check, `isExpired()` / `LooseValidAt` (nbf, iat) with `leeway` and the injectable clock
+(a PSR-20 clock per call), `IssuedBy` and `PermittedFor`; each failure maps to pype's own
+`InvalidToken` message. The claims returned are the payload as sent (ints stay ints). HS256 secrets
+must be 32+ bytes and RSA keys 2048+ bits (lcobucci's and RFC 7518's rule). The guard returns null for non-JWT bearer tokens (no
 dots) so it chains with `TokenGuard`, unless `jwt.only`; a JWT that fails is a 401
 (`invalid_token`). The user is `Auth::findUser(sub)` (`jwt.user = database`), a `JwtUser` from
 the claims (`claims`), or whatever a subclass's `user()` returns; the claims go into the context

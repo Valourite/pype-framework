@@ -70,7 +70,13 @@ two named below without asking).
    ranges rejected). New: `@daily`-style macros, `L`, `W`, `#`, `?` (owner: accept them). DST: a
    skipped time runs an hour later (was: never); a fixed-time task runs once in a repeated hour
    (was: twice; owner chose once). `CronTimezoneTest` (New York, London, Sydney).
-4. `Auth\Jwt` on `lcobucci/jwt` or `firebase/php-jwt` (API, config and security properties unchanged).
+4. **`Auth\Jwt` on `lcobucci/jwt`** — done (`^5.6`, BSD-3, needs `psr/clock`; optional: `suggest` +
+   `require-dev`, like PHPMailer). Chosen over firebase/php-jwt because firebase keeps its leeway and
+   clock in process-wide statics (`JWT::$leeway`, `$timestamp`), against the worker-safety rule and the
+   injected test clock. API, config and every security property unchanged; the algorithm is still
+   picked from the configured keys. Owner's choice: HS256 secrets must be 32+ bytes (RFC 7518), so two
+   JwtTest secrets were lengthened and the twelve bench's 23-byte challenge secret no longer works.
+   New: an `iat` in the future is rejected. `JwtSecurityTest`.
 5. Security review (report only) of Session, VerifyCsrfToken, SessionGuard, RememberTokens,
    PasswordResets, Auth against the OWASP cheat sheets.
 
@@ -631,6 +637,7 @@ the problem is security-sensitive, dev-only, or an interop interface.
 | Dev error page | ours (done) | measured against whoops: same zero production cost, and only ours can show pype's route, stages and the request's log lines |
 | Logger, cache | ours, implementing **PSR-3** (done) / **PSR-16** | interface packages only, so Monolog etc. plug in |
 | Encryption | native `sodium_*` | no package needed |
+| JWT | **lcobucci/jwt** behind `Auth\Jwt` (2026-11-02, optional) | signatures and claim checks are security-sensitive; instance-based (no static clock/leeway, unlike firebase/php-jwt) |
 | Cron expressions | **dragonmantank/cron-expression** behind `Schedule\Cron` (2026-11-02) | a widely used parser (Laravel's) with no dependencies; date and DST edge cases are easy to get wrong in our own. Only the scheduler loads it |
 
 ## Won't do (conflicts with the principles)

@@ -61,7 +61,8 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
    drivers are only autoloaded when picked). Measure when in doubt (`docs/BENCHMARKS.md`).
 5. **No runtime dependencies** except PSR interface packages (`psr/container`, `psr/log`,
    `psr/simple-cache`) and the few the owner approved (`dragonmantank/cron-expression`, behind
-   `Schedule\Cron`, loaded only by the scheduler). Ask before adding any other. Security-sensitive protocols (mail) use a package behind a pype
+   `Schedule\Cron`, loaded only by the scheduler). Ask before adding any other. Optional packages
+   (`suggest`): PHPMailer (mail), lcobucci/jwt (`Auth\Jwt`), Latte, BladeOne. Security-sensitive protocols (mail) use a package behind a pype
    interface, as an optional `suggest`; dev-only tools (e.g. whoops) go in `require-dev`. See
    "Build or use a package?" in `docs/ROADMAP.md`.
 6. **Worker-safe.** Apps may run under OpenSwoole, where one `Application` serves many
@@ -191,7 +192,8 @@ symlinks this checkout into the app's `vendor/`.
   `remoteAddr()` is in the trusted list, and it walks `X-Forwarded-For` right to left (the leftmost
   entries are client-controlled). `TrustProxiesTest` guards this.
 - **JWT: the algorithm comes from the configured key, never from the token's header.** Keep it
-  that way (`Jwt::verify()`), or `alg: none` / RS-to-HS key confusion become possible.
+  that way (`Jwt::verify()` picks lcobucci's signer and key from config; the header only chooses
+  among configured pairs), or `alg: none` / RS-to-HS key confusion become possible.
 - `QueryBuilder::$quoted` is a process-wide memo of quoted identifiers: keep the cap, and only
   ever put identifiers in it (never values).
 - The twelve bench (`../twelve-bench/`) builds its pype image from this checkout; rebuild

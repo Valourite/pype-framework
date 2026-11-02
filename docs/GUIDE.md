@@ -400,7 +400,9 @@ in `api_tokens`. Each request costs one indexed lookup, and they can be revoked 
 **JWTs** (`Pype\Auth\JwtGuard`) carry signed claims and are checked without a token lookup, but
 can't be revoked before they expire. Use them for tokens from an identity provider (Auth0,
 Cognito, Keycloak, Firebase: RS256 with their public key), for services that check each other's
-tokens, or short-lived stateless access. Add the guard and configure `jwt` in `config/auth.php`:
+tokens, or short-lived stateless access. Signing and checking are done by
+[lcobucci/jwt](https://github.com/lcobucci/jwt), so install it first (`composer require lcobucci/jwt`;
+pype says so if it's missing). Then add the guard and configure `jwt` in `config/auth.php`:
 
 ```php
 'guards' => [Pype\Auth\SessionGuard::class, Pype\Auth\JwtGuard::class, Pype\Auth\TokenGuard::class],
@@ -410,7 +412,10 @@ $router->get('/me', ['auth', fn (User $user, Pype\Auth\JwtClaims $claims) => ...
 ```
 
 The guard accepts only the algorithm your configured key allows (so `alg: none` and key
-confusion fail), checks `exp`/`nbf` (with `leeway`), and `iss`/`aud` when set. It loads the user
+confusion fail), requires `exp`, checks `exp`/`nbf`/`iat` (with `leeway`; an `iat` in the future is
+"not valid yet"), and `iss`/`aud` when set. **Keys:** `JWT_SECRET` must be at least 32 bytes (RFC 7518;
+`php -r 'echo bin2hex(random_bytes(32));'`), and RSA keys at least 2048 bits; shorter ones are a
+configuration error, not a weak token (before 0.12, short secrets were accepted). It loads the user
 by `sub`; with `'user' => 'claims'` it builds a `Pype\Auth\JwtUser` from the token instead
 (tokens from a provider whose users aren't in your table). Keep lifetimes short.
 Providers publish their keys as a JWKS URL; pype doesn't fetch it (yet): convert the key(s) to
