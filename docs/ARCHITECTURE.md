@@ -234,9 +234,15 @@ disconnects the `Connection` and retries. `Mailer::queue()` renders now and push
 `routes/schedule.php` is loaded only by `Console` (`schedule:run`, `schedule:list`), with
 `$schedule` (`Schedule\Schedule`) and `$app` in scope. `Task`s hold a 5-field expression that the
 frequency helpers edit field by field, a timezone, `when()`, `withoutOverlapping()` (cache lock
-`schedule.{id}`) and `onOneServer()` (cache `add` of `schedule.{id}.{YmdHi}`). `Schedule\Cron` is
-our own parser (`*`, values, ranges, steps, lists, names; DOW 7 = 0; when both day fields are
-restricted either matches, and a field starting with `*` counts as unrestricted, as in cron).
+`schedule.{id}`) and `onOneServer()` (cache `add` of `schedule.{id}.{YmdHi}`). `Schedule\Cron`
+delegates matching to `dragonmantank/cron-expression` (`isDue($time, $time's zone)`) and keeps
+classic cron's rules where the package differs: `n/step` is rewritten to `n-max/step`; descending
+ranges throw; when both day fields are restricted and one starts with `*` (`*/2`), it checks
+`m h dom mon *` and `m h * mon dow` separately and ANDs them (the package would OR); macros
+(`@daily`) are expanded to 5 fields (`Cron::$fields`) so `Task`'s helpers can edit them. DST: the
+package runs a time skipped by spring-forward an hour later; `Cron` skips the second pass of a
+repeated hour for tasks with a fixed minute and hour (the same local minute an hour earlier means
+it already ran).
 `Schedule::run()` runs due tasks one by one in-process: commands through `Console::call()`
 (non-zero exit = failure), closures through `Invoker`, jobs via `Queue::push()`; each failure is
 logged and the rest still run. `schedule:work` starts a fresh `schedule:run` process every minute.

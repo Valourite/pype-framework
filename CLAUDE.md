@@ -60,7 +60,8 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
    loaded, connect, or run per request (e.g. `SwooleServer`, the schema builder, rate-limit
    drivers are only autoloaded when picked). Measure when in doubt (`docs/BENCHMARKS.md`).
 5. **No runtime dependencies** except PSR interface packages (`psr/container`, `psr/log`,
-   `psr/simple-cache`). Security-sensitive protocols (mail) use a package behind a pype
+   `psr/simple-cache`) and the few the owner approved (`dragonmantank/cron-expression`, behind
+   `Schedule\Cron`, loaded only by the scheduler). Ask before adding any other. Security-sensitive protocols (mail) use a package behind a pype
    interface, as an optional `suggest`; dev-only tools (e.g. whoops) go in `require-dev`. See
    "Build or use a package?" in `docs/ROADMAP.md`.
 6. **Worker-safe.** Apps may run under OpenSwoole, where one `Application` serves many
@@ -85,7 +86,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 | `src/Database/` | `Connection` (PDO), `QueryBuilder`, `Page`, `Migrator`, `Schema/` (builder), `Factory`/`Fake`/`Seeder`/`Hydrator` |
 | `src/Cache/` | `Cache` (PSR-16 + remember/add/increment, `lock()`, `stale()`, `group()`), `Store` + file/apcu/database/array/null, `Lock`, `CacheProvider` |
 | `src/Queue/` | `Queue` + database/sync/array drivers, `QueuedJob`, `Worker` (`queue:work`), `FailedJobs`, `QueueProvider` |
-| `src/Schedule/` | `Schedule` (routes/schedule.php), `Task` (frequency helpers, locks), `Cron` (own parser) |
+| `src/Schedule/` | `Schedule` (routes/schedule.php), `Task` (frequency helpers, locks), `Cron` (dragonmantank/cron-expression + classic-cron rules, DST) |
 | `src/RateLimit/` | `RateLimiter` + database/apcu/array drivers (used by `Stages\Throttle`) |
 | `src/Stages/` | built-in stages: Cors, JsonBody, MethodOverride, RequestId, Throttle, TrimStrings, TrustProxies |
 | `src/Log/` | `Logger` (PSR-3, JSON lines), `LogReader`, `LogRequests`, `LogReporter`, `LogViewer` + `views/viewer.php`, `LogProvider` |

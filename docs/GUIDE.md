@@ -785,6 +785,22 @@ Frequencies: `everyMinute`, `everyFiveMinutes` (also Ten, Fifteen, Thirty), `hou
 or for the whole file. `withoutOverlapping()` skips a run while the last one is still going;
 `onOneServer()` runs it on only one of several servers (needs `CACHE_DRIVER=database`).
 
+`cron()` takes the usual 5 fields (`*`, `5`, `1-5`, `*/10`, `5/20` = from 5 every 20, lists, `JAN`,
+`MON`; day-of-week 7 is Sunday), plus `@hourly`/`@daily`/`@weekly`/`@monthly`/`@yearly`, `L` (last
+day of the month: `cron('0 6 L * *')`), `15W` (the weekday nearest the 15th), `1#2` (the second
+Monday) and `?`. Matching is done by
+[dragonmantank/cron-expression](https://github.com/dragonmantank/cron-expression); pype keeps
+classic cron's rules on top: when both day fields are set a day matching either runs, unless one is
+written `*/n`, then both must match.
+
+**Daylight saving.** Times are read in the task's timezone (or the file's, else PHP's):
+- Clocks go **forward**: a time that doesn't exist that day runs an hour later, once
+  (`dailyAt('02:30')` in New York on 8 March 2026 runs at 03:30).
+- Clocks go **back**: a task with a fixed minute and hour (`dailyAt('01:30')`, `cron('15 0-2 * * *')`)
+  runs in the first pass of the repeated hour only. `hourly()`, `everyMinute()`,
+  `everyThirtyMinutes()` and other tasks with `*` in the minute or hour run in both passes, so an
+  hourly task runs 25 times that day.
+
 One cron line runs it all:
 
 ```

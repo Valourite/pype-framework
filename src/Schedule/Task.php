@@ -43,8 +43,9 @@ final class Task
 
     public function cron(string $expression): self
     {
-        new Cron($expression);   // fail now on a typo, not at 3 am
-        $this->cron = preg_split('/\s+/', trim($expression));
+        $cron = new Cron($expression);   // fail now on a typo, not at 3 am
+        // '@daily' becomes its 5 fields, so ->daily()->at(...)-style edits still work on it.
+        $this->cron = str_starts_with(trim($expression), '@') ? $cron->fields : preg_split('/\s+/', trim($expression));
 
         return $this;
     }

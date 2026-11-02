@@ -64,7 +64,12 @@ two named below without asking).
    missing = production); `APP_DEBUG=off`/`no` meant debug **on** (`Env` casts on/off, yes/no, trims);
    PHP warnings printed paths into FPM responses without a php.ini (`run()` sets `display_errors=0`
    outside debug); `serve` pointed at `/_pype/logs` when it wasn't registered.
-3. `Schedule\Cron` delegates to `dragonmantank/cron-expression` (API unchanged; DST/timezone tests).
+3. **Cron on `dragonmantank/cron-expression`** — done (`^3.6`: MIT, no dependencies of its own,
+   loaded only by the scheduler). `Cron`'s API, `Task`/`Schedule` and the helpers are unchanged;
+   classic-cron rules kept where the package differs (`n/step`, `*/n` day fields ANDed, descending
+   ranges rejected). New: `@daily`-style macros, `L`, `W`, `#`, `?` (owner: accept them). DST: a
+   skipped time runs an hour later (was: never); a fixed-time task runs once in a repeated hour
+   (was: twice; owner chose once). `CronTimezoneTest` (New York, London, Sydney).
 4. `Auth\Jwt` on `lcobucci/jwt` or `firebase/php-jwt` (API, config and security properties unchanged).
 5. Security review (report only) of Session, VerifyCsrfToken, SessionGuard, RememberTokens,
    PasswordResets, Auth against the OWASP cheat sheets.
@@ -626,6 +631,7 @@ the problem is security-sensitive, dev-only, or an interop interface.
 | Dev error page | ours (done) | measured against whoops: same zero production cost, and only ours can show pype's route, stages and the request's log lines |
 | Logger, cache | ours, implementing **PSR-3** (done) / **PSR-16** | interface packages only, so Monolog etc. plug in |
 | Encryption | native `sodium_*` | no package needed |
+| Cron expressions | **dragonmantank/cron-expression** behind `Schedule\Cron` (2026-11-02) | a widely used parser (Laravel's) with no dependencies; date and DST edge cases are easy to get wrong in our own. Only the scheduler loads it |
 
 ## Won't do (conflicts with the principles)
 
