@@ -77,8 +77,16 @@ two named below without asking).
    picked from the configured keys. Owner's choice: HS256 secrets must be 32+ bytes (RFC 7518), so two
    JwtTest secrets were lengthened and the twelve bench's 23-byte challenge secret no longer works.
    New: an `iat` in the future is rejected. `JwtSecurityTest`.
-5. Security review (report only) of Session, VerifyCsrfToken, SessionGuard, RememberTokens,
-   PasswordResets, Auth against the OWASP cheat sheets.
+5. **Security review** (report only) of Session, VerifyCsrfToken, SessionGuard, RememberTokens,
+   PasswordResets, Auth against the OWASP cheat sheets — done; fixes left for a later round (owner).
+   Passed: id regeneration on login/logout, HttpOnly + SameSite=Lax, constant-time comparisons,
+   hashed/single-use/expiring reset and remember tokens, password_hash/verify/needs_rehash with a
+   dummy hash, no per-request state in services. Open, most severe first:
+   - **High and Medium (5):** in the private security advisory GHSA-5gjc-8cfw-fcf8 (draft; not public
+     until fixed). Fix these first.
+   - **Low (7):** GitHub issues #1-#7, labelled `security`.
+
+Released as 0.12.0 (2026-11-03).
 
 ## Next: not decided
 

@@ -14,7 +14,12 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.11.0 (2026-10-22): `Pype\Auth\Authorize` (a stage you extend with `allows()`, filled from the context;
+- **Released:** 0.12.0 (2026-11-03): the hardening round (ROADMAP "Hardening round"): `TrustProxies`,
+  `APP_ENV` (missing = production, forces debug off; `display_errors=0`), cron on
+  `dragonmantank/cron-expression`, `Auth\Jwt` on `lcobucci/jwt` (optional; 32-byte HS256 secrets).
+  Breaking: set `APP_ENV=local` for dev, `composer require lcobucci/jwt` for JWT, 32+ byte `JWT_SECRET`.
+  The security review's findings are open: advisory GHSA-5gjc-8cfw-fcf8 (private), issues #1-#7.
+  0.11.0 (2026-10-22): `Pype\Auth\Authorize` (a stage you extend with `allows()`, filled from the context;
   403/404/redirect; routes:check reads its parameters) and `make:authorize`.
   0.10.1 (2026-10-22): `SWOOLE_MODE` defaults to `process` (overloaded, base mode failed 24%
   of requests where process queued them).
