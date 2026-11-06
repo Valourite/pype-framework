@@ -14,14 +14,8 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Unreleased (committed 2026-11-06, not tagged):** OpenSwoole start-up warnings (base mode + finite
-  `memory_limit`, opcache off); the `serve` mail line only with a `MailProvider`; a short
-  `auth.jwt.secret` stops the app at boot (`Jwt::checkConfig()` in `AuthProvider`). Removed (no
-  compatibility in 0.x): the nested `app.swoole.settings` array, the pre-0.7 `batch` column upgrade
-  in `Migrator`. Docs: base mode, opcache/JIT, the $12 challenge at its real box size (BENCHMARKS),
-  ROADMAP trimmed to open work + a changelog.
-- **Released:** 0.12.0 (2026-11-03), the hardening round. Every release is one line in ROADMAP
-  "Changelog".
+- **Released:** 0.13.0 (2026-11-06): OpenSwoole start-up warnings, a short JWT secret fails at boot,
+  no 0.x compatibility shims, docs trimmed. Every release is one line in ROADMAP "Changelog".
 - **Open:** the security review's findings (ROADMAP "Open": private advisory GHSA-5gjc-8cfw-fcf8,
   issues #1-#7), the OpenSwoole static-handler check. The $12 challenge PR (#335, the app is
   `../twelve-pype`, bench `../twelve-bench`) waits for the challenge's benchmark batch.

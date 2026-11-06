@@ -156,6 +156,10 @@ the problem is security-sensitive, dev-only, or an interop interface.
 
 ## Changelog
 
+- **0.13.0** (2026-11-06): OpenSwoole start-up warnings (base mode with a finite `memory_limit`,
+  opcache off); the `serve` mail line only with a `MailProvider`; a short `auth.jwt.secret` stops the
+  app at boot. Breaking: the nested `app.swoole.settings` array and the pre-0.7 migrations-table
+  upgrade are gone. The test suite passes on MySQL and Postgres again.
 - **0.12.0** (2026-11-03): hardening round: `TrustProxies`; `APP_ENV` (missing = production, forces
   debug off; `display_errors=0`); `Env` casts on/off, yes/no; cron on `dragonmantank/cron-expression`
   (macros, `L`/`W`/`#`, DST rules); `Auth\Jwt` on `lcobucci/jwt` (optional; HS256 secrets 32+ bytes,
