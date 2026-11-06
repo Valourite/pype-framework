@@ -8,6 +8,8 @@ use DateTimeImmutable;
 use DateTimeInterface;
 use PHPUnit\Framework\TestCase;
 use Pype\Database\Hydrator;
+use Pype\Database\Schema\Schema;
+use Pype\Database\Schema\Table;
 use Pype\Tests\Support\TestDatabase;
 
 enum HydratedStatus: string
@@ -63,10 +65,22 @@ final class HydratorTest extends TestCase
         $this->assertSame('0', $reply->extra);
     }
 
-    public function test_query_builder_rows_from_sqlite(): void
+    public function test_query_builder_rows_from_the_database(): void
     {
+        // Whatever the driver returns (strings from PDO, ints from SQLite) is cast to the declared types.
         $db = TestDatabase::fresh();
-        $db->statement('CREATE TABLE replies (id INTEGER PRIMARY KEY, internal INTEGER NOT NULL, pinned INTEGER, hours REAL, code TEXT, created_at TEXT, read_at TEXT, status TEXT, ref INTEGER, extra TEXT)');
+        (new Schema($db))->create('replies', function (Table $t) {
+            $t->id();
+            $t->integer('internal');
+            $t->integer('pinned')->nullable();
+            $t->decimal('hours', 8, 2)->nullable();
+            $t->string('code')->nullable();
+            $t->string('created_at')->nullable();
+            $t->string('read_at')->nullable();
+            $t->string('status')->nullable();
+            $t->integer('ref')->nullable();
+            $t->string('extra')->nullable();
+        });
         $db->table('replies')->insert(['internal' => 0, 'pinned' => 1, 'hours' => 2, 'code' => '0042', 'created_at' => '2026-10-22 08:30:00', 'read_at' => null, 'status' => 'open', 'ref' => 1]);
 
         $reply = $db->table('replies')->as(HydratedReply::class)->first();

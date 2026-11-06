@@ -135,7 +135,8 @@ final class QueryBuilderTest extends TestCase
         $query = $this->db->table('expenses')->where('amount', '>', 20)
             ->where(fn (QueryBuilder $q) => $q->where('note', 'a')->orWhere('note', 'c'));
         $this->assertSame(['c'], $notes($query));
-        $this->assertStringContainsString('WHERE "amount" > ? AND ("note" = ? OR "note" = ?)', $query->toSql());
+        $q = $this->db->quote(...);
+        $this->assertStringContainsString("WHERE {$q('amount')} > ? AND ({$q('note')} = ? OR {$q('note')} = ?)", $query->toSql());
         $this->assertSame([20, 'a', 'c'], $query->bindings());
 
         // orWhere with a group, nested groups, a group with whereNull/whereIn, and an empty group.

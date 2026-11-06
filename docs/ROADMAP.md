@@ -9,9 +9,6 @@ anything big. Finished rounds are summarised in the changelog at the end; the de
 - **Security review findings (2026-11-02), fix first:** High and Medium (5) in the private advisory
   GHSA-5gjc-8cfw-fcf8 (draft; keep details out of public files until fixed), Low (7) as GitHub
   issues #1-#7 (label `security`).
-- **Two tests fail off SQLite** (already in 0.12.0; `bin/test-databases.sh` stops at the MySQL leg):
-  `HydratorTest::test_query_builder_rows_from_sqlite` (MySQL and Postgres: an insert without `id`)
-  and `QueryBuilderTest::test_grouped_conditions` (MySQL: expects `"` quoting, gets backticks).
 - Small open questions from earlier rounds: a `View` with no extension in the template name (which
   engine?); `Validate::prepare()` re-indexing rows vs keeping keys, and whether prepared input
   replaces the request input for later stages; a second outlet listed after `RedirectOutlet` wins but
