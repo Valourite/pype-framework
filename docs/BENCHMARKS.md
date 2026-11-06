@@ -120,6 +120,31 @@ disk). Two runs; numbers agreed within ~3% except SQLite (±25%).
 - Real jobs (mail, HTTP calls) take milliseconds, so the queue's overhead rarely matters;
   add workers for slow jobs. Not measured: the desktop host's disk dominates commit times.
 
+### The $12-server challenge at the real box size (2026-11-06, pype 0.12, `../twelve-bench/`)
+
+The challenge box is 1 vCPU / 2 GB (the round below used 2 vCPU / 4 GB by mistake). pype 0.12 on
+OpenSwoole, serving directly (no nginx), one worker. Submitted as challenge PR #335
+(`php-pype-dayne-valourite`, Ubuntu's PHP 8.3).
+
+| | result |
+|---|---|
+| challenge users (`load.js`, 5 min hold) | **68,000** pass (p99 3-4 ms, 0.7-0.8% errors, CPU ~30%) |
+| limit | the box's 65,535 file descriptors (`accept() failed: Too many open files`), not CPU |
+| max req/s, process mode, opcache + JIT | ~20-22k |
+| max req/s, base mode, opcache + JIT | 24k passes at 91% CPU |
+
+| php.ini (process mode) | CPU at 10k req/s | 20k req/s passed |
+|---|---|---|
+| opcache off | 57% | 1 of 3 |
+| opcache | 50% | 1 of 3 |
+| opcache + tracing JIT | 49% | 3 of 3 |
+
+- 2 workers on 1 vCPU failed at 20k req/s: 1 worker per core holds.
+- Base mode is ~20% cheaper per request than process mode here, but needs `memory_limit=-1`
+  (see GUIDE, "Mode and worker recycling").
+- Leaderboard context: hand-written PHP + Swoole entries score 71,000 (the same fd cap),
+  Symfony/FrankenPHP 21,000, CodeIgniter/FrankenPHP 9,500.
+
 ### The $12-server challenge: pype vs Laravel (2026-10-20, `../twelve-bench/`)
 
 The challenge's 5-endpoint feed API on SQLite, built idiomatically with pype (OpenSwoole) and

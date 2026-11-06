@@ -52,9 +52,26 @@ final class Jwt
         if (!class_exists(Builder::class)) {
             throw new \LogicException('JWTs need lcobucci/jwt. Run: composer require lcobucci/jwt');
         }
+        self::checkConfig($config);
         $this->secret = (string) ($config['secret'] ?? '');
         $public = $config['public_key'] ?? null;
         $this->publicKeys = is_array($public) ? $public : ($public === null || $public === '' ? [] : ['' => $public]);
+    }
+
+    /**
+     * Refuses a config that can't work, so the app fails when it boots (AuthProvider calls this)
+     * instead of on the first token: an HS256 secret under 32 bytes (RFC 7518 3.2; lcobucci
+     * refuses them too). An outside system with a shorter fixed key needs its own Guard.
+     *
+     * @throws \RuntimeException
+     */
+    public static function checkConfig(array $config): void
+    {
+        $secret = (string) ($config['secret'] ?? '');
+
+        if ($secret !== '' && strlen($secret) < 32) {
+            throw new \RuntimeException('auth.jwt.secret must be at least 32 bytes: php -r \'echo bin2hex(random_bytes(32));\'');
+        }
     }
 
     /** A setting from config/auth.php 'jwt' (e.g. 'user', 'only'). */
@@ -169,10 +186,6 @@ final class Jwt
     {
         if ($this->secret === '') {
             throw new \RuntimeException('auth.jwt.secret is not set.');
-        }
-        if (strlen($this->secret) < 32) {
-            // RFC 7518 3.2: an HS256 key must be at least 256 bits. lcobucci refuses shorter ones too.
-            throw new \RuntimeException('auth.jwt.secret must be at least 32 bytes: php -r \'echo bin2hex(random_bytes(32));\'');
         }
 
         return InMemory::plainText($this->secret);

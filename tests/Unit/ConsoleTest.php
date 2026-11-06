@@ -20,6 +20,20 @@ final class ConsoleTest extends TestCase
         return [$code, (string) ob_get_clean()];
     }
 
+    public function test_serve_mentions_mail_only_in_apps_that_send_it(): void
+    {
+        $notice = function (array $providers): string {
+            $app = new Application(__DIR__, ['app' => ['providers' => $providers], 'mail' => ['driver' => 'log']]);
+            ob_start();
+            (new \ReflectionMethod(Console::class, 'mailNotice'))->invoke(new Console($app), 'localhost:8000');
+
+            return (string) ob_get_clean();
+        };
+
+        $this->assertSame('', $notice([]));
+        $this->assertStringContainsString('MAIL_DRIVER=log', $notice([\Pype\Mail\MailProvider::class]));
+    }
+
     public function test_input_parsing(): void
     {
         $in = new Input(['2026-10', '--dry-run', '--to=a@b.c', 'extra', '--empty=']);

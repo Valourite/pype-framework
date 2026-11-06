@@ -334,8 +334,7 @@ driver) or `.sql`, run in name order, recorded by name and batch in `pype_migrat
 batch per `migrate`). `rollback()` undoes the last batch (or the last N) newest first, via
 `down()` or the part of a `.sql` file after a `-- down` line; one without either is irreversible
 (detected up front by checking whether the class overrides `Migration::down()`), and rollback
-stops there. Tables from before 0.7 get a `batch` column, one batch per existing migration in
-the order they ran. `fresh()` = `Schema::dropAllTables()` + `migrate()`. On Postgres,
+stops there. `fresh()` = `Schema::dropAllTables()` + `migrate()`. On Postgres,
 `QueryBuilder::insert()` uses `RETURNING *` instead of PDO's `lastInsertId()` (`LASTVAL()`,
 which fails on tables without a sequence and aborts the transaction).
 

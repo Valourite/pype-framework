@@ -155,23 +155,6 @@ final class MigrationRollbackTest extends TestCase
         $this->assertSame([['id' => 1]], array_map(fn ($r) => ['id' => (int) $r['id']], $this->db->select('SELECT * FROM a')));
     }
 
-    public function test_tables_from_before_batches_get_one_batch_per_migration(): void
-    {
-        $this->createTable('2026_01_01_000000_create_a', 'a');
-        $this->createTable('2026_01_02_000000_create_b', 'b');
-        $this->migrator()->migrate();
-
-        // Turn pype_migrations back into the 0.6 shape: no batch column.
-        $this->db->statement('DROP TABLE pype_migrations');
-        $this->db->statement('CREATE TABLE pype_migrations (name VARCHAR(255) PRIMARY KEY, ran_at VARCHAR(32) NOT NULL)');
-        $this->db->table('pype_migrations')->insert(['name' => '2026_01_01_000000_create_a', 'ran_at' => '2026-01-01 10:00:00']);
-        $this->db->table('pype_migrations')->insert(['name' => '2026_01_02_000000_create_b', 'ran_at' => '2026-01-01 10:00:00']);
-
-        $this->assertSame(['2026_01_01_000000_create_a' => 1, '2026_01_02_000000_create_b' => 2], $this->migrator()->status());
-        $this->assertSame(['2026_01_02_000000_create_b'], $this->migrator()->rollback());
-        $this->assertSame(['a'], $this->tables());
-    }
-
     public function test_fresh_drops_everything_and_migrates(): void
     {
         $this->createTable('2026_01_01_000000_create_a', 'a', down: false);   // fresh doesn't need down()

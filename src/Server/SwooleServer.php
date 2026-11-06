@@ -56,15 +56,13 @@ final class SwooleServer
      * The server `php bin/pype serve` starts. `app.swoole` is a list of OpenSwoole/Swoole server
      * settings, passed through as is over pype's defaults (settings()); the skeleton's config
      * spreads env_prefixed('SWOOLE_') into it, so any SWOOLE_* variable sets one. Also `mode`
-     * ('base' or 'process'), the short names `workers` and `static_handler`, and, from older
-     * configs, a nested `settings` array (the others win over it). --workers wins over all.
+     * ('base' or 'process') and the short names `workers` and `static_handler`. --workers wins over all.
      *
      * @param array<string, string> $options  serve's --name=value options
      */
     public static function fromApp(Application $app, array $options = []): self
     {
-        $config = (array) $app->config('app.swoole', []);
-        $settings = [...(array) ($config['settings'] ?? []), ...array_diff_key($config, ['settings' => true])];
+        $settings = (array) $app->config('app.swoole', []);
 
         foreach (self::ALIASES as $short => $name) {
             if (array_key_exists($short, $settings)) {
@@ -95,6 +93,12 @@ final class SwooleServer
      * Below capacity it measured the same as base.
      * SWOOLE_BASE (1): each worker accepts and owns its connections; no extra hop, but they close
      * when it restarts (a proxy retries GETs; a POST fails) and wait on it while it's busy.
+     * With one CPU-bound worker and no recycling it is cheaper: ~20% less CPU per request on the
+     * $12 challenge (1 vCPU, 24k req/s at 91% vs process failing at 22k).
+     * Base mode needs memory_limit=-1 (or very high) with many open connections: OpenSwoole
+     * counts each connection's receive buffer (~64 KB) against PHP's limit, so 256M dies with
+     * "Allowed memory size ... exhausted" at ~4,000 keep-alive connections (measured: 3,000 fine,
+     * 6,000 fatal). Process mode keeps the buffers in the reactor: 68,000 connections at 256M.
      * Same numbers in OpenSwoole (SIMPLE_MODE / POOL_MODE).
      */
     public function mode(): int
@@ -106,6 +110,49 @@ final class SwooleServer
             'process', 2 => 2,
             default => throw new RuntimeException("app.swoole.mode must be 'base' or 'process', not [{$mode}]."),
         };
+    }
+
+    /**
+     * PHP settings that hurt a long-running server, as start-up warnings (start() prints them to
+     * stderr; nothing is changed).
+     *
+     * @return list<string>
+     */
+    public function warnings(): array
+    {
+        return self::iniWarnings(
+            $this->mode(),
+            (string) ini_get('memory_limit'),
+            extension_loaded('Zend OPcache') && filter_var(ini_get('opcache.enable_cli'), FILTER_VALIDATE_BOOL),
+        );
+    }
+
+    /**
+     * - Base mode with a memory limit: OpenSwoole/Swoole count each open connection's receive
+     *   buffer (~64 KB) against PHP's memory_limit, so the worker dies with "Allowed memory size
+     *   exhausted" at about limit / 64 KB keep-alive connections (256M: 3,000 fine, 6,000 fatal).
+     * - Opcache off under the CLI: workers compile each file once but skip the optimizer
+     *   (measured ~10% more CPU per request).
+     *
+     * @return list<string>
+     */
+    public static function iniWarnings(int $mode, string $memoryLimit, bool $opcache): array
+    {
+        $warnings = [];
+        $limit = in_array($memoryLimit, ['', '-1'], true) ? -1 : ini_parse_quantity($memoryLimit);
+
+        if ($mode === 1 && $limit > 0) {
+            $warnings[] = sprintf(
+                'base mode with memory_limit=%s: each open connection counts ~64 KB against it, so a worker dies near %s connections. Set memory_limit=-1 (real memory stays far lower) or SWOOLE_MODE=process.',
+                $memoryLimit,
+                number_format(intdiv($limit, 64 * 1024)),
+            );
+        }
+        if (!$opcache) {
+            $warnings[] = 'opcache is off for the CLI (opcache.enable_cli=0): workers run unoptimized code, ~10% more CPU per request. Set opcache.enable_cli=1.';
+        }
+
+        return $warnings;
     }
 
     public static function available(): bool
@@ -125,6 +172,10 @@ final class SwooleServer
         $this->nativeStatic = (bool) $settings['enable_static_handler'];
         $server->set($settings);
         $this->app->router->warm();   // built once here; every forked worker inherits the tables
+
+        foreach ($this->warnings() as $warning) {
+            fwrite(STDERR, "Warning: {$warning}\n");
+        }
 
         $server->on('start', function () use ($settings) {
             printf("pype serving on http://%s:%d with OpenSwoole (%d workers, %s mode). Code changes need a restart.\n", $this->host, $this->port, $settings['worker_num'], $this->mode() === 2 ? 'process' : 'base');

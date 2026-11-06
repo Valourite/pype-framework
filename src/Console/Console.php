@@ -11,6 +11,7 @@ use Pype\Application;
 use Pype\Cache\Cache;
 use Pype\Cache\Store;
 use Pype\Database\Migrator;
+use Pype\Mail\MailProvider;
 use Pype\Pipeline\Invoker;
 use Pype\Queue\FailedJobs;
 use Pype\Queue\Queue;
@@ -139,9 +140,17 @@ final class Console
         return $code;
     }
 
-    /** One line at start-up when mail isn't really delivered, and where to read it. */
+    /** One line at start-up when mail isn't really delivered, and where to read it (apps that send mail only). */
     private function mailNotice(string $address): void
     {
+        $sendsMail = array_filter(
+            (array) $this->app->config('app.providers', []),
+            static fn ($p) => is_a($p, MailProvider::class, true),
+        );
+        if ($sendsMail === []) {
+            return;
+        }
+
         $mailbox = $this->app->router->named('pype.mail');
         $logs = $this->app->router->named('pype.logs');
         $where = match (true) {

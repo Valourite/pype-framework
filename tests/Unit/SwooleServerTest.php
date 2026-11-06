@@ -181,6 +181,22 @@ final class SwooleServerTest extends TestCase
         $this->assertArrayNotHasKey('mode', $s, 'mode is the constructor argument, not a setting');
     }
 
+    public function test_start_up_warnings_for_php_settings(): void
+    {
+        $this->assertSame([], SwooleServer::iniWarnings(2, '256M', true));   // process mode: the reactor holds the buffers
+        $this->assertSame([], SwooleServer::iniWarnings(1, '-1', true));
+        $this->assertSame([], SwooleServer::iniWarnings(1, '', true));
+
+        [$base] = SwooleServer::iniWarnings(1, '256M', true);
+        $this->assertStringContainsString('memory_limit=256M', $base);
+        $this->assertStringContainsString('near 4,096 connections', $base);
+        $this->assertStringContainsString('memory_limit=-1', $base);
+
+        [$opcache] = SwooleServer::iniWarnings(2, '-1', false);
+        $this->assertStringContainsString('opcache.enable_cli=1', $opcache);
+        $this->assertCount(2, SwooleServer::iniWarnings(1, '1G', false));
+    }
+
     public function test_mode_is_process_unless_set(): void
     {
         $app = new Application(__DIR__);
@@ -307,14 +323,16 @@ final class SwooleServerTest extends TestCase
     public function test_from_app_passes_settings_through_and_named_options_win(): void
     {
         $app = new Application(__DIR__, ['app' => ['swoole' => [
+            'package_max_length' => 8 * 1024 * 1024,
+            'http_compression' => false,
+            'worker_num' => 2,
             'workers' => 4,
-            'settings' => ['package_max_length' => 8 * 1024 * 1024, 'worker_num' => 2, 'http_compression' => false],
         ]]]);
 
         $s = SwooleServer::fromApp($app)->settings();
         $this->assertSame(8 * 1024 * 1024, $s['package_max_length']);   // any server setting, as is
         $this->assertFalse($s['http_compression']);
-        $this->assertSame(4, $s['worker_num']);                            // app.swoole.workers wins over settings
+        $this->assertSame(4, $s['worker_num']);                            // the short name wins over worker_num
         $this->assertSame(6, SwooleServer::fromApp($app, ['workers' => '6'])->settings()['worker_num']);   // and --workers over both
     }
 

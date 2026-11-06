@@ -219,32 +219,5 @@ final class Migrator
         $this->db->statement(
             'CREATE TABLE IF NOT EXISTS ' . self::TABLE . ' (name VARCHAR(255) PRIMARY KEY, ran_at VARCHAR(32) NOT NULL, batch INTEGER NOT NULL DEFAULT 0)'
         );
-
-        $this->addBatchColumn();
-    }
-
-    /**
-     * Tables made before 0.7 have no batch column. Add it and give each migration that already
-     * ran its own batch, in the order they ran, so a first rollback undoes only the newest one.
-     */
-    private function addBatchColumn(): void
-    {
-        $columns = match ($this->db->driver()) {
-            'sqlite' => array_column($this->db->select('PRAGMA table_info(' . self::TABLE . ')'), 'name'),
-            'mysql' => array_column($this->db->select('SELECT column_name AS name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?', [self::TABLE]), 'name'),
-            default => array_column($this->db->select('SELECT column_name AS name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ?', [self::TABLE]), 'name'),
-        };
-
-        if (in_array('batch', $columns, true)) {
-            return;
-        }
-
-        $this->db->transaction(function (Connection $db) {
-            $db->statement('ALTER TABLE ' . self::TABLE . ' ADD COLUMN batch INTEGER NOT NULL DEFAULT 0');
-
-            foreach ($db->select('SELECT name FROM ' . self::TABLE . ' ORDER BY ran_at, name') as $i => $row) {
-                $db->table(self::TABLE)->where('name', $row['name'])->update(['batch' => $i + 1]);
-            }
-        });
     }
 }

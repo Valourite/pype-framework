@@ -14,34 +14,17 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.12.0 (2026-11-03): the hardening round (ROADMAP "Hardening round"): `TrustProxies`,
-  `APP_ENV` (missing = production, forces debug off; `display_errors=0`), cron on
-  `dragonmantank/cron-expression`, `Auth\Jwt` on `lcobucci/jwt` (optional; 32-byte HS256 secrets).
-  Breaking: set `APP_ENV=local` for dev, `composer require lcobucci/jwt` for JWT, 32+ byte `JWT_SECRET`.
-  The security review's findings are open: advisory GHSA-5gjc-8cfw-fcf8 (private), issues #1-#7.
-  0.11.0 (2026-10-22): `Pype\Auth\Authorize` (a stage you extend with `allows()`, filled from the context;
-  403/404/redirect; routes:check reads its parameters) and `make:authorize`.
-  0.10.1 (2026-10-22): `SWOOLE_MODE` defaults to `process` (overloaded, base mode failed 24%
-  of requests where process queued them).
-  0.10.0 (2026-10-22): the Helpdesk load test's fixes (ROADMAP "Found by the Helpdesk
-  load test", H1-H8): `count()` leaves out LEFT JOINs on the joined id, every `SWOOLE_*`/`SQLITE_*` env
-  variable is a setting (`env_prefixed()`), `SWOOLE_MODE` base|process, `max_request` 100,000, the
-  hydrator casts to declared types, `JsonOutlet::with(status:)` and `Page::map()` from `data()`, grouped
-  `where(fn ...)` and `orderByRaw()`, `withIp()`, empty file inputs, `Schedule::load()`.
-  0.9.1 (2026-10-21): `JsonOutlet::data()` (JSON outlets read the context, like page outlets),
-  pype's dev pages use stages, docs drop "handlers" (every step is a stage); skeleton has no app/Handlers.
-  0.9.0 (2026-10-21): the work list from the expenses app (ROADMAP "Decided with the
-  owner": routesIn, stage()/::with(), Requires/Provides + routes:check, pagination links, redirects,
-  template locals, page outlets, Latte/Blade by extension, dev mailbox, test helpers, Chain, resource
-  routes, per-user throttle and scoped unique, Validate::prepare, FK indexes, install command); skeleton
-  has AGENTS.md. Still open: roles, the static-handler check on real OpenSwoole.
-  0.8.1 (docs: `docs/GUIDE.md`), 0.8.0 (framework + skeleton on Packagist): factories + seeders, and the
-  $12-server bench round (query builder memo, container-aware 1x workers, JWT, configurable
-  errors, TrimStrings, insertReturning, URL-decoded params). 0.7.0: migration rollback + the
-  Postgres insert fix. 0.6.0: queue + scheduler. 0.5.0: validation rules, mail, password
-  reset/verification, encryption, remember me, cache.
-- **Next:** the owner will have a fresh AI build the same app (a helpdesk) in Laravel and in pype, to
-  compare. Open framework items: roles (parked), the OpenSwoole static-handler check.
+- **Unreleased (committed 2026-11-06, not tagged):** OpenSwoole start-up warnings (base mode + finite
+  `memory_limit`, opcache off); the `serve` mail line only with a `MailProvider`; a short
+  `auth.jwt.secret` stops the app at boot (`Jwt::checkConfig()` in `AuthProvider`). Removed (no
+  compatibility in 0.x): the nested `app.swoole.settings` array, the pre-0.7 `batch` column upgrade
+  in `Migrator`. Docs: base mode, opcache/JIT, the $12 challenge at its real box size (BENCHMARKS),
+  ROADMAP trimmed to open work + a changelog.
+- **Released:** 0.12.0 (2026-11-03), the hardening round. Every release is one line in ROADMAP
+  "Changelog".
+- **Open:** the security review's findings (ROADMAP "Open": private advisory GHSA-5gjc-8cfw-fcf8,
+  issues #1-#7), the OpenSwoole static-handler check. The $12 challenge PR (#335, the app is
+  `../twelve-pype`, bench `../twelve-bench`) waits for the challenge's benchmark batch.
 - **Example app:** `../expenses` is an old test bed (local git only, never give it a remote); it is not
   kept up to date with the framework. Its bench is in `bench/` (see `docs/BENCHMARKS.md`).
 
@@ -175,6 +158,9 @@ symlinks this checkout into the app's `vendor/`.
 - APCu's `apcu_delete()` returns false for a missing key; PSR-16 `delete()` must still return true.
 - `routes/schedule.php` must never be loaded per request (it's only `Console::schedule()`):
   `ScheduleTest` checks a web request doesn't run it.
+- **OpenSwoole base mode counts each open connection's receive buffer (~64 KB) against PHP's
+  `memory_limit`**: at 256M the worker dies at ~4,000 keep-alive connections (measured, twelve
+  bench 2026-11-06). Base mode + many connections needs `memory_limit=-1`; process mode doesn't.
 - Queue workers are long-running like OpenSwoole: no per-job state in services. Forked test
   workers need their **own** `Connection` (never share the parent's PDO across `pcntl_fork`),
   and SQLite tests across processes need a file database (`:memory:` is per connection).

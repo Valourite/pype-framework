@@ -415,7 +415,10 @@ The guard accepts only the algorithm your configured key allows (so `alg: none` 
 confusion fail), requires `exp`, checks `exp`/`nbf`/`iat` (with `leeway`; an `iat` in the future is
 "not valid yet"), and `iss`/`aud` when set. **Keys:** `JWT_SECRET` must be at least 32 bytes (RFC 7518;
 `php -r 'echo bin2hex(random_bytes(32));'`), and RSA keys at least 2048 bits; shorter ones are a
-configuration error, not a weak token (before 0.12, short secrets were accepted). It loads the user
+configuration error, not a weak token: a short `auth.jwt.secret` stops the app when it boots, so
+`serve`, `bin/pype` and every request fail at once instead of the first token. A system you don't
+control that signs with a shorter fixed key needs its own `Guard` (verify with `hash_hmac` +
+`hash_equals`), with that key under your own config key rather than `auth.jwt`. It loads the user
 by `sub`; with `'user' => 'claims'` it builds a `Pype\Auth\JwtUser` from the token instead
 (tokens from a provider whose users aren't in your table). Keep lifetimes short.
 Providers publish their keys as a JWKS URL; pype doesn't fetch it (yet): convert the key(s) to
@@ -1140,7 +1143,7 @@ Error"}}`), no log viewer, no dev mailbox, and `db:seed`/`migrate:fresh` need `-
 **without** `APP_ENV` counts as production too, so a forgotten line is the safe one; put
 `APP_ENV=local` in your development `.env` (the skeleton's `.env.example` has it).
 `$app->environment()` and `$app->isProduction()` tell your own code. `APP_DEBUG` reads `false`,
-`off`, `no` and `0` as off (before 0.12, `off` and `no` turned debug **on**).
+`off`, `no` and `0` as off.
 
 Outside debug, `Application::run()` also turns PHP's `display_errors` off, so a PHP warning (an
 undefined array key...) is logged by PHP instead of being printed into the page with its file path.
@@ -1202,7 +1205,27 @@ held:
 - `base`: each worker accepts and owns its connections, one hop fewer. When a worker restarts, its
   keep-alive connections close with it (a proxy retries a GET, but a POST caught on one fails with a
   502: 20 a minute with recycling forced every 20,000 requests at 2,000 req/s), and when it's busy new
-  connections wait on it until the proxy times out.
+  connections wait on it until the proxy times out. With one CPU-bound worker and recycling off
+  (`SWOOLE_MAX_REQUEST=0`) it's the cheaper choice: on the $12 server challenge (1 vCPU, SQLite)
+  it used ~20% less CPU per request than `process`.
+  **Base mode needs `memory_limit=-1`** (or a very high limit) once many connections are open:
+  OpenSwoole counts each connection's receive buffer (~64 KB) against PHP's `memory_limit`, so at
+  the usual 256M the worker dies ("Allowed memory size ... exhausted") at about 4,000 keep-alive
+  connections. Real memory stays far lower (~600 MB at 68,000 connections). Process mode doesn't
+  have this: its reactor holds the buffers.
+
+**PHP settings for OpenSwoole.** `serve` warns at start (on stderr, changing nothing) about base
+mode with a memory limit and about opcache being off. It runs PHP's CLI, where opcache is off unless you turn it on.
+Turn it on, with the JIT: measured on the $12 challenge (1 vCPU, one worker), opcache off cost
+~10% more CPU per request even though each worker compiles a file only once (without opcache PHP
+skips its optimizer), and the tracing JIT took another ~5-10% off.
+
+```ini
+opcache.enable_cli = 1
+opcache.validate_timestamps = 0   ; code changes need a restart anyway
+opcache.jit = tracing
+opcache.jit_buffer_size = 64M
+```
 
 ### Behind a proxy or load balancer
 

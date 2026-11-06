@@ -77,6 +77,20 @@ final class JwtSecurityTest extends TestCase
         $this->jwt([])->issue(['sub' => '1']);
     }
 
+    public function test_a_short_secret_stops_the_app_at_boot(): void
+    {
+        $this->expectExceptionMessage('at least 32 bytes');
+        (new \Pype\Application(__DIR__, ['auth' => ['jwt' => ['secret' => 'too-short']]]))->register(\Pype\Auth\AuthProvider::class);
+    }
+
+    public function test_no_secret_or_a_long_one_boots(): void
+    {
+        foreach ([[], ['secret' => str_repeat('k', 32)], ['public_key' => 'only RS256']] as $jwt) {
+            (new \Pype\Application(__DIR__, ['auth' => ['jwt' => $jwt]]))->register(\Pype\Auth\AuthProvider::class);
+        }
+        $this->addToAssertionCount(1);
+    }
+
     public function test_rsa_keys_under_2048_bits_are_refused(): void
     {
         [$private] = self::rsa(9, 1024);
