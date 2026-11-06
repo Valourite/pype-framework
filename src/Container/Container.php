@@ -21,6 +21,9 @@ final class Container implements ContainerInterface
     /** @var array<string, mixed> */
     private array $instances = [];
 
+    /** @var array<class-string, array<string, array{0: ?string, 1: \ReflectionParameter}>|false> see plan() */
+    private array $plans = [];
+
     public function bind(string $id, Closure|string|null $concrete = null, bool $shared = false): void
     {
         $concrete ??= $id;
@@ -112,6 +115,61 @@ final class Container implements ContainerInterface
     /** @param array<int|string, mixed> $given */
     private function build(string $class, array $given = []): object
     {
+        $params = $this->plans[$class] ?? $this->plan($class);
+
+        if ($params === false) {
+            if ($given !== []) {
+                throw new ContainerException("Cannot build [{$class}] with arguments: it has no constructor.");
+            }
+
+            return new $class();
+        }
+
+        foreach (array_keys($given) as $key) {
+            if (is_int($key) ? $key >= count($params) : !isset($params[$key])) {
+                throw new ContainerException(is_int($key)
+                    ? "Cannot build [{$class}]: argument #{$key} is past its constructor's parameters."
+                    : "Cannot build [{$class}]: its constructor has no parameter \${$key}.");
+            }
+        }
+
+        $args = [];
+        $position = 0;
+        foreach ($params as $name => [$type, $param]) {
+            if ($given !== [] && array_key_exists($name, $given)) {
+                $args[] = $given[$name];
+            } elseif ($given !== [] && array_key_exists($position, $given)) {
+                $args[] = $given[$position];
+            } elseif ($type !== null) {
+                try {
+                    $args[] = $this->make($type);
+                } catch (ContainerException|NotFoundException $e) {
+                    // An optional dependency nothing provides (?Closure $x = null, an unbound
+                    // interface with a default): use the default instead of failing.
+                    $args[] = $param->isDefaultValueAvailable() ? $param->getDefaultValue() : throw $e;
+                }
+            } elseif ($param->isDefaultValueAvailable()) {
+                $args[] = $param->getDefaultValue();   // evaluated each time: a `new Foo()` default is never shared
+            } else {
+                throw new ContainerException(
+                    "Cannot resolve parameter \${$name} of [{$class}]."
+                );
+            }
+            $position++;
+        }
+
+        return new $class(...$args);
+    }
+
+    /**
+     * A class's constructor parameters, reflected once per class (stages, repositories and
+     * outlets are built on every request): name => [class to resolve or null, the parameter],
+     * or false when it has no constructor.
+     *
+     * @return array<string, array{0: ?string, 1: \ReflectionParameter}>|false
+     */
+    private function plan(string $class): array|false
+    {
         if (!class_exists($class)) {
             throw new NotFoundException("Cannot resolve [{$class}]: no binding and class does not exist.");
         }
@@ -125,49 +183,15 @@ final class Container implements ContainerInterface
         $constructor = $reflection->getConstructor();
 
         if ($constructor === null) {
-            if ($given !== []) {
-                throw new ContainerException("Cannot build [{$class}] with arguments: it has no constructor.");
-            }
-
-            return new $class();
+            return $this->plans[$class] = false;
         }
 
-        $params = $constructor->getParameters();
-
-        foreach (array_keys($given) as $key) {
-            $known = is_int($key) ? $key < count($params) : array_filter($params, static fn ($p) => $p->getName() === $key) !== [];
-            if (!$known) {
-                throw new ContainerException(is_int($key)
-                    ? "Cannot build [{$class}]: argument #{$key} is past its constructor's parameters."
-                    : "Cannot build [{$class}]: its constructor has no parameter \${$key}.");
-            }
-        }
-
-        $args = [];
-        foreach ($params as $param) {
+        $params = [];
+        foreach ($constructor->getParameters() as $param) {
             $type = $param->getType();
-
-            if (array_key_exists($param->getName(), $given)) {
-                $args[] = $given[$param->getName()];
-            } elseif (array_key_exists($param->getPosition(), $given)) {
-                $args[] = $given[$param->getPosition()];
-            } elseif ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
-                try {
-                    $args[] = $this->make($type->getName());
-                } catch (ContainerException|NotFoundException $e) {
-                    // An optional dependency nothing provides (?Closure $x = null, an unbound
-                    // interface with a default): use the default instead of failing.
-                    $args[] = $param->isDefaultValueAvailable() ? $param->getDefaultValue() : throw $e;
-                }
-            } elseif ($param->isDefaultValueAvailable()) {
-                $args[] = $param->getDefaultValue();
-            } else {
-                throw new ContainerException(
-                    "Cannot resolve parameter \${$param->getName()} of [{$class}]."
-                );
-            }
+            $params[$param->getName()] = [$type instanceof ReflectionNamedType && !$type->isBuiltin() ? $type->getName() : null, $param];
         }
 
-        return $reflection->newInstanceArgs($args);
+        return $this->plans[$class] = $params;
     }
 }

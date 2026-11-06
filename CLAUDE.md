@@ -14,11 +14,11 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.13.0 (2026-11-06): OpenSwoole start-up warnings, a short JWT secret fails at boot,
-  no 0.x compatibility shims, docs trimmed. Every release is one line in ROADMAP "Changelog".
+- **Released:** 0.13.1 (2026-11-06): per-request speed-ups from profiling the $12 challenge app
+  (hydrator, container, pipeline, static check). Every release is one line in ROADMAP "Changelog".
 - **Open:** the security review's findings (ROADMAP "Open": private advisory GHSA-5gjc-8cfw-fcf8,
-  issues #1-#7), the OpenSwoole static-handler check. The $12 challenge PR (#335, the app is
-  `../twelve-pype`, bench `../twelve-bench`) waits for the challenge's benchmark batch.
+  issues #1-#7), the OpenSwoole static-handler check. The $12 challenge (the app is `../twelve-pype`,
+  bench `../twelve-bench`): #335 scored 36,000 users (CPU-bound); a follow-up PR runs 0.13.1.
 - **Example app:** `../expenses` is an old test bed (local git only, never give it a remote); it is not
   kept up to date with the framework. Its bench is in `bench/` (see `docs/BENCHMARKS.md`).
 

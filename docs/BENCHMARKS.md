@@ -120,6 +120,30 @@ disk). Two runs; numbers agreed within ~3% except SQLite (±25%).
 - Real jobs (mail, HTTP calls) take milliseconds, so the queue's overhead rarely matters;
   add workers for slow jobs. Not measured: the desktop host's disk dominates commit times.
 
+### Profiling the $12 challenge app (2026-11-06, 0.13.0 → 0.13.1, `../twelve-bench/profile.sh`)
+
+The challenge scored #335 (0.12) at **36,000 users**, CPU-bound: 246 µs of CPU per request on its box
+(Xeon Platinum 8260 2.4 GHz VPS, load from other machines) against ~45-55 µs here (Ryzen 9700X, k6
+on the same host). Locally the 65,535 fds stopped it at ~30% CPU, so the CPU limit never showed.
+Hand-written PHP + Swoole entries use 94-101 µs there.
+
+`profile.sh` runs `k6/rate.js` at a fixed rate (8,000 req/s, the challenge's request mix) against
+one worker in a 1 vCPU container and divides the container's CPU time by the requests; excimer
+samples the worker (`/_bench/profile/start|stop`, `BENCH_PROFILE=1`). Profile with the JIT off
+(`INI=php-nojit-nolimit.ini`): with it on, excimer's self times land on the wrong functions.
+
+| | CPU per request |
+|---|---|
+| raw PHP + OpenSwoole (the leaderboard's #24 `server.php`, same image) | 23 µs |
+| pype 0.13.0 | 45 µs |
+| pype 0.13.1 | 38.5 µs |
+
+Where 0.13.0's time went: SQLite ~30%, OpenSwoole + the socket write ~20%, pipeline/container/stage
+calls ~13%, hydrating rows into objects ~9%, building the query ~8.5%, JSON + router + request ~10%.
+0.13.1 cut the hydrator (PHP's coercion instead of a cast per value), container reflection (once per
+class), the pipeline's closures (by index), and the static-file check. Memoizing `Router::compile`
+would save 0.27 µs: not done.
+
 ### The $12-server challenge at the real box size (2026-11-06, pype 0.12, `../twelve-bench/`)
 
 The challenge box is 1 vCPU / 2 GB (the round below used 2 vCPU / 4 GB by mistake). pype 0.12 on

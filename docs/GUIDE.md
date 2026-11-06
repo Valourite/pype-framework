@@ -909,10 +909,11 @@ $db->select('SELECT * FROM users WHERE email LIKE ?', ['%@example.com']);
 $db->transaction(fn (Connection $db) => ...);
 ```
 
-`->as(User::class)` builds each row into the class with only the columns its constructor takes, cast
-to the declared types: SQLite's `0`/`1` into `bool`, numeric strings (MySQL, Postgres) into
-`int`/`float`, a date string into `DateTimeImmutable`, a value into a backed enum. So data classes can
-say what they mean:
+`->as(User::class)` builds each row into the class with only the columns its constructor takes, turned
+into the declared types: SQLite's `0`/`1` into `bool`, numeric strings (MySQL, Postgres) into
+`int`/`float`, numbers into `string` (PHP's own type coercion), a date string into `DateTimeImmutable`,
+a value into a backed enum. A value PHP can't coerce (`'abc'` into `int`) is a `TypeError`. So data
+classes can say what they mean:
 
 ```php
 final readonly class Reply

@@ -54,7 +54,7 @@ final class Pipeline
     /** @param list<class-string<Stage>|Stage|Closure> $stages */
     public function through(array $stages): self
     {
-        $this->stages = $stages;
+        $this->stages = array_values($stages);
 
         return $this;
     }
@@ -77,28 +77,20 @@ final class Pipeline
 
     public function then(Closure $destination): mixed
     {
-        $chain = array_reduce(
-            array_reverse($this->stages),
-            fn (Closure $next, mixed $stage) => fn (mixed $passable) => $this->guard(
-                fn () => $this->invoke($stage, $passable, $next),
-                $passable,
-            ),
-            fn (mixed $passable) => $this->guard(fn () => $destination($passable), $passable),
-        );
-
-        return $chain($this->passable);
+        return $this->step(0, $this->passable, $this->stages, $destination);
     }
 
-    /** Run the pipeline; whatever falls out the far end is returned. */
-    public function thenReturn(): mixed
-    {
-        return $this->then(fn (mixed $passable) => $passable);
-    }
-
-    private function guard(Closure $call, mixed $passable): mixed
+    /**
+     * Run stage $i (or the destination after the last one). Each stage gets a $next that runs
+     * the one after it, and is guarded on its own: an exception becomes a result right there,
+     * so the stages around it still see one.
+     */
+    private function step(int $i, mixed $passable, array $stages, Closure $destination): mixed
     {
         try {
-            $result = $call();
+            $result = isset($stages[$i])
+                ? $this->invoke($stages[$i], $passable, fn (mixed $passable) => $this->step($i + 1, $passable, $stages, $destination))
+                : $destination($passable);
         } catch (Throwable $e) {
             if ($this->onException === null) {
                 throw $e;
@@ -108,6 +100,12 @@ final class Pipeline
         }
 
         return $this->mapResult === null ? $result : ($this->mapResult)($result);
+    }
+
+    /** Run the pipeline; whatever falls out the far end is returned. */
+    public function thenReturn(): mixed
+    {
+        return $this->then(fn (mixed $passable) => $passable);
     }
 
     private function invoke(mixed $stage, mixed $passable, Closure $next): mixed

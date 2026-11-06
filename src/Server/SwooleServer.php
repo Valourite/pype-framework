@@ -291,7 +291,16 @@ final class SwooleServer
             return false;
         }
 
-        $path = rawurldecode(parse_url($server['request_uri'] ?? '/', PHP_URL_PATH) ?: '/');
+        $uri = (string) ($server['request_uri'] ?? '/');
+        $dot = strrpos($uri, '.');
+
+        // Most requests are for routes, not files: no extension in the last segment (and nothing
+        // percent-encoded that could decode to one) means no file, without decoding or a stat.
+        if (($dot === false || str_contains(substr($uri, $dot), '/')) && !str_contains($uri, '%')) {
+            return false;
+        }
+
+        $path = rawurldecode(parse_url($uri, PHP_URL_PATH) ?: '/');
 
         if (str_contains($path, "\0") || str_contains($path, '\\') || preg_match('#(^|/)\.#', $path) === 1) {
             return false;   // NUL, backslashes, dotfiles and ".." segments

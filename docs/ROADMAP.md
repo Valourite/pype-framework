@@ -18,37 +18,6 @@ anything big. Finished rounds are summarised in the changelog at the end; the de
 
 Pick the next round from the open items, Tier 2 and the follow-ups below with the owner.
 
-### Found by the $12 challenge re-run (2026-11-06)
-
-Porting `../twelve-pype` to 0.12 and tuning it for the 1 vCPU box (challenge PR #335). The owner
-chose 1-3 (done 2026-11-06, general, no compatibility shims for old app configs);
-4 dropped (old configs aren't supported in 0.x), 5 not planned.
-
-**Done:** `SwooleServer::warnings()`/`iniWarnings()` print the base-mode memory and opcache warnings
-at start; `serve` mentions mail only when a `MailProvider` is registered; `Jwt::checkConfig()` runs
-in `AuthProvider` (a set `auth.jwt.secret` under 32 bytes stops the app at boot). Tests:
-SwooleServerTest, JwtSecurityTest, ConsoleTest. Checked on real OpenSwoole (twelve-pype image).
-
-1. **`serve` start-up warnings for OpenSwoole.** Base mode with a finite `memory_limit` dies at
-   ~4,000 connections (see CLAUDE.md traps); `serve` could print one line with the rough cap
-   (`memory_limit / 64 KB`) and the fix. Same for `opcache.enable_cli=0` (~10% more CPU per
-   request, measured). Nothing changes behaviour; it only says so at start.
-2. **The mail line at start-up in apps without mail.** `serve` prints "Mail: MAIL_DRIVER=log, so
-   nothing is delivered" even when `MailProvider` isn't in `app.providers` (twelve-pype has no
-   mail). Print it only when mail is registered.
-3. **`auth.jwt.secret` under 32 bytes fails per request, not at boot.** `Jwt::hmacKey()` throws on
-   the first verify, so a short secret means 500s in production instead of a refused start. Check
-   it when the app boots (AuthProvider, if `JwtGuard` is in the guards). The 32-byte minimum stays
-   (RFC 7518); an outside system with a shorter fixed key needs its own `Guard` (twelve-pype's
-   `ChallengeJwtGuard`, ~60 lines): worth a GUIDE sentence.
-4. **`SWOOLE_*` only works through the app's config.** The skeleton spreads `env_prefixed('SWOOLE_')`
-   into `app.swoole`; an app whose config predates that (twelve-pype did) silently ignores
-   `SWOOLE_MODE` etc. The start-up line shows the mode, which is how it was caught. Optional: have
-   `SwooleServer::fromApp()` read `SWOOLE_*` itself under the config's values.
-5. Smaller: typed int route params reject non-numbers with a 404 (`invalid_param`) but accept `0`
-   and `-1`; the challenge wanted 400 for those, so the app kept its own `ValidPostId` stage. A
-   positive-int constraint with a chosen status is possible but probably not worth a feature.
-
 ## Idea to circle back to: route caching (discussed 2026-10-20, not planned)
 
 Replaces the earlier "whole-page caching for guests only" idea. The owner's direction: **one
@@ -114,8 +83,9 @@ $router->get('/dashboard', ['auth', new CacheRoute(ttl: 3600), ResolveMonth::cla
 
 ## Benchmark follow-ups
 
-- **The $12 challenge PR (#335)** will be benchmarked on the challenge's real 1 vCPU droplet with k6 on
-  a separate machine: compare with the local 68,000 users (BENCHMARKS).
+- **The $12 challenge:** #335 (0.12) scored 36,000 users, CPU-bound at 246 µs/request on the scoring
+  box (~5x the local cost; BENCHMARKS). A follow-up PR runs 0.13.1. What's left per request is mostly
+  SQLite and OpenSwoole; the app rebuilds its query each request (~3 µs locally).
 - **Re-run the database comparison** (SQLite vs Postgres vs MariaDB on the expenses bench): the
   2026-10-16 numbers were all SQLite (dash ignored `env.sh`'s argument; fixed 2026-10-20).
 - Benchmark real MySQL 8 (the bench uses MariaDB because Debian has no MySQL 8 package), e.g.
@@ -156,6 +126,11 @@ the problem is security-sensitive, dev-only, or an interop interface.
 
 ## Changelog
 
+- **0.13.1** (2026-11-06): faster per request, from profiling the $12 challenge app: `Hydrator` lets
+  PHP coerce scalar columns (20 rows 8.6 → 3.6 µs), the container reflects each class's constructor
+  once, `Pipeline` steps through stages by index, `SwooleServer` skips the static-file check for
+  paths without an extension. 45 → 38.5 µs per request end to end (twelve bench, 1 vCPU). A
+  fractional value into an `int` parameter now gets PHP's deprecation notice instead of a silent cut.
 - **0.13.0** (2026-11-06): OpenSwoole start-up warnings (base mode with a finite `memory_limit`,
   opcache off); the `serve` mail line only with a `MailProvider`; a short `auth.jwt.secret` stops the
   app at boot. Breaking: the nested `app.swoole.settings` array and the pre-0.7 migrations-table
