@@ -14,8 +14,9 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 
 ## Where things stand (keep this current)
 
-- **Released:** 0.13.1 (2026-11-06): per-request speed-ups from profiling the $12 challenge app
-  (hydrator, container, pipeline, static check). Every release is one line in ROADMAP "Changelog".
+- **Released:** 0.14.0 (2026-11-12): the development screens (`DebugProvider`: /_pype/routes,
+  /_pype/requests, /_pype/sandbox) and route params that survive a copied request. Every release is
+  one line in ROADMAP "Changelog".
 - **Open:** the security review's findings (ROADMAP "Open": private advisory GHSA-5gjc-8cfw-fcf8,
   issues #1-#7), the OpenSwoole static-handler check. The $12 challenge (the app is `../twelve-pype`,
   bench `../twelve-bench`): #335 scored 36,000 users (CPU-bound); a follow-up PR runs 0.13.1.

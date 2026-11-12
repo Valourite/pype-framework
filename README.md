@@ -28,6 +28,7 @@ framework. Every route is its own pipeline of **stages**; output is data (JSON b
 | `Pype\Container`   | PSR-11 container with autowiring                                                          |
 | `Pype\Testing`     | `TestClient` — run requests in-process, no server; keeps cookies like a browser           |
 | `Pype\Console`     | `bin/pype` commands: serve, routes, make:*, migrate (+ rollback, fresh, status), optimize, cache:clear, schedule:*, queue:* |
+| `Pype\Debug`       | Development screens (opt-in `DebugProvider`, debug only): every route as its pipeline (`/_pype/routes`), what each request did stage by stage (`/_pype/requests`), and a sandbox database to send requests into (`/_pype/sandbox`) |
 | `Pype\Log`         | PSR-3 `Logger` (JSON lines, a file per day; forwards to stderr, syslog or any PSR-3 logger), request log, and a live **log viewer** page with filters (`/_pype/logs`) |
 | `Pype\Security`    | `Encrypter`: authenticated encryption (libsodium) with APP_KEY, key rotation       |
 | `Pype\Mail`        | `Message`, `Mail` classes, `Mailer` (`send()`, or `later()` after the response); SMTP/sendmail via PHPMailer, log, array (tests) |

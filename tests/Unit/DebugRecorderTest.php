@@ -8,6 +8,8 @@ use Closure;
 use PHPUnit\Framework\TestCase;
 use Pype\Application;
 use Pype\Database\Connection;
+use Pype\Database\Schema\Schema;
+use Pype\Database\Schema\Table;
 use Pype\Debug\DebugProvider;
 use Pype\Debug\RequestLog;
 use Pype\Debug\Trace;
@@ -50,7 +52,11 @@ final class DebugRecorderTest extends TestCase
     {
         $app = new Application($this->base, ['app' => ['env' => 'local', 'debug' => $on], 'debug' => $debug]);
         $db ??= TestDatabase::fresh();
-        $db->statement('CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body VARCHAR(100), password VARCHAR(100))');
+        (new Schema($db))->create('notes', function (Table $t) {
+            $t->id();
+            $t->string('body', 100)->nullable();
+            $t->string('password', 100)->nullable();
+        });
         $app->container->instance(Connection::class, $db);
         $app->through(RequestId::class, MethodOverride::class);
         $app->register(DebugProvider::class);
@@ -116,7 +122,10 @@ final class DebugRecorderTest extends TestCase
     public function test_a_connection_tells_its_listener_about_every_query(): void
     {
         $db = TestDatabase::fresh();
-        $db->statement('CREATE TABLE things (id INTEGER PRIMARY KEY, name VARCHAR(50))');
+        (new Schema($db))->create('things', function (Table $t) {
+            $t->id();
+            $t->string('name', 50);
+        });
         $heard = [];
         $db->listen(function (string $sql, array $bindings, float $ms) use (&$heard): void {
             $heard[] = [$sql, $bindings, $ms >= 0];

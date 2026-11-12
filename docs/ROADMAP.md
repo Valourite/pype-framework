@@ -126,6 +126,16 @@ the problem is security-sensitive, dev-only, or an interop interface.
 
 ## Changelog
 
+- **0.14.0** (2026-11-12): development screens, opt-in with `Pype\Debug\DebugProvider` and debug
+  only: `/_pype/routes` (every route taken apart into its stages, what each needs and puts),
+  `/_pype/requests` (what each request did, stage by stage, with times and queries) and
+  `/_pype/sandbox` (a throw-away SQLite database from your migrations and seeder; a request sent
+  into it shows the response, the stages and the rows it added, changed and deleted). New hooks,
+  free unless set: `Application::observeStages()` / `Pipeline::observe()`, `Connection::listen()`;
+  `PYPE_SANDBOX` runs a whole debug process against one SQLite file with nothing leaving it.
+  Fixed: route params were lost to whoever held the request from before `TrimStrings` or
+  `MethodOverride` copied it (an outlet rendering a request with a query string or a body); they
+  now live in the request's shared context, and outlets render with the request the route got.
 - **0.13.1** (2026-11-06): faster per request, from profiling the $12 challenge app: `Hydrator` lets
   PHP coerce scalar columns (20 rows 8.6 → 3.6 µs), the container reflects each class's constructor
   once, `Pipeline` steps through stages by index, `SwooleServer` skips the static-file check for
