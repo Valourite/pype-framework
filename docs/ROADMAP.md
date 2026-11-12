@@ -126,6 +126,10 @@ the problem is security-sensitive, dev-only, or an interop interface.
 
 ## Changelog
 
+- **0.14.1** (2026-11-12): for looking at a running app. The log viewer can offer several log
+  folders (`log.viewer.sources`, a `*` for one per tenant folder), and only those. Guarded outside
+  debug, `DebugProvider` registers the route screen alone: the recorder only with
+  `debug.requests.enabled` set by name, the sandbox never.
 - **0.14.0** (2026-11-12): development screens, opt-in with `Pype\Debug\DebugProvider` and debug
   only: `/_pype/routes` (every route taken apart into its stages, what each needs and puts),
   `/_pype/requests` (what each request did, stage by stage, with times and queries) and

@@ -152,6 +152,17 @@ final class DebugExplorerTest extends TestCase
             $this->assertSame(403, (new TestClient($guarded))->get($path)->status(), "{$path}: behind the app's stages");
         }
 
+        // Behind the app's own guard outside debug, it is the route screen and no more: the recorder
+        // only when asked for by name, the sandbox never (it needs debug to be a sandbox at all).
+        $admin = ['enabled' => true, 'stages' => [fn (\Pype\Http\Request $r, \Closure $next) => $next($r)]];
+        $guarded = new TestClient($this->app($admin + ['requests' => ['enabled' => null]], on: false));
+        $this->assertSame([200, 200, 404, 404], array_map(fn ($p) => $guarded->get($p)->status(), ['/_pype', '/_pype/routes', '/_pype/requests', '/_pype/sandbox']));
+        $this->assertStringNotContainsString('Sandbox', $guarded->get('/_pype')->body());
+        $this->assertStringNotContainsString('sandbox', $guarded->get('/_pype/routes/show?m=GET&p=/quotes')->body());
+
+        $recording = new TestClient($this->app($admin + ['requests' => ['enabled' => true, 'dir' => 'pype-explorer-requests'], 'sandbox' => ['enabled' => true]], on: false));
+        $this->assertSame([200, 404], [$recording->get('/_pype/requests')->status(), $recording->get('/_pype/sandbox')->status()]);
+
         $moved = new TestClient($this->app(['path' => '/dev/']));
         $this->assertSame(200, $moved->get('/dev/routes')->status());
         $this->assertSame(404, $moved->get('/_pype/routes')->status());

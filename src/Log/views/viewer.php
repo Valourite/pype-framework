@@ -6,6 +6,8 @@
  * @var list<string> $files
  * @var string       $today
  * @var string       $request  request id to filter on, from ?request=
+ * @var list<string> $sources  other log folders to offer (log.viewer.sources), by label
+ * @var string       $source   the one being shown; '' is the app's own log
  */
 $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES, 'UTF-8');
 if (!in_array($today, $files, true)) {
@@ -59,6 +61,14 @@ if (!in_array($today, $files, true)) {
 <body>
 <header>
     <h1>Logs</h1>
+    <?php if ($sources !== []): ?>
+    <select id="source" title="Which log">
+        <option value="">This app</option>
+        <?php foreach ($sources as $name): ?>
+            <option value="<?= $h($name) ?>"<?= $name === $source ? ' selected' : '' ?>><?= $h($name) ?></option>
+        <?php endforeach ?>
+    </select>
+    <?php endif ?>
     <select id="file" title="Day">
         <?php foreach ($files as $file): ?>
             <option value="<?= $h($file) ?>"<?= $file === $today ? ' selected' : '' ?>><?= $h(substr($file, 5, 10)) ?><?= $file === $today ? ' (today)' : '' ?></option>
@@ -84,6 +94,9 @@ if (!in_array($today, $files, true)) {
 (() => {
     const url = <?= json_encode($entriesUrl, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
     const $ = (id) => document.getElementById(id);
+    const source = <?= json_encode($source, JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+    // Another log has its own days: load the page again for it.
+    if ($('source')) $('source').addEventListener('change', (e) => { location.search = e.target.value ? '?source=' + encodeURIComponent(e.target.value) : ''; });
     const list = $('list'), older = $('older'), empty = $('empty'), statusText = $('status'), dot = $('dot');
     const MAX_ROWS = 2000, FAST = 1000, SLOW = 5000, IDLE_AFTER = 60000;
     let state = { file: $('file').value, next: 0, before: 0, today: $('file').value };
@@ -91,6 +104,7 @@ if (!in_array($today, $files, true)) {
 
     const filters = () => {
         const p = new URLSearchParams({ file: state.file });
+        if (source) p.set('source', source);
         for (const id of ['level', 'request', 'q']) { if ($(id).value.trim()) p.set(id, $(id).value.trim()); }
         return p;
     };

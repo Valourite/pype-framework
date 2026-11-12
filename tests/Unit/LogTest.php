@@ -27,12 +27,11 @@ final class LogTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (glob($this->base . '/storage/logs/*') ?: [] as $f) {
-            unlink($f);
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($this->base, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($files as $file) {
+            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
         }
-        @rmdir($this->base . '/storage/logs');
-        @rmdir($this->base . '/storage');
-        @rmdir($this->base);
+        rmdir($this->base);
     }
 
     private function app(array $log = [], bool $debug = true): Application
@@ -173,6 +172,40 @@ final class LogTest extends TestCase
         // The viewer's own requests are never logged.
         $this->assertSame([], array_filter($this->lines(), fn ($l) => str_contains($l['message'], '/_pype/logs')));
         $this->assertSame(400, $client->get('/_pype/logs/entries?file=../secret')->status());
+    }
+
+    public function test_the_viewer_offers_other_log_folders_by_name_and_nothing_else(): void
+    {
+        // An app that writes a log per tenant, and one for its worker.
+        foreach (['storage/logs/tenants/acme' => 'from acme', 'storage/logs/tenants/beta' => 'from beta', 'storage/worker' => 'from the worker', 'storage/private' => 'not offered'] as $dir => $message) {
+            (new Logger("{$this->base}/{$dir}", 'debug'))->notice($message);
+        }
+        file_put_contents($this->base . '/storage/logs/tenants/a-file', 'not a folder');
+
+        $app = $this->app(['requests' => false, 'viewer' => ['enabled' => true, 'sources' => ['Worker' => 'storage/worker', 'storage/logs/tenants/*']]]);
+        $app->router->get('/hello', fn (LoggerInterface $log) => $log->notice('from the app') ?? 'ok');
+        $client = new TestClient($app);
+        $client->get('/hello');
+        $messages = fn (string $query) => array_column($client->get('/_pype/logs/entries?level=notice' . $query)->json('data.entries'), 'message');
+
+        $page = $client->get('/_pype/logs')->body();
+        foreach (['This app', '>Worker<', '>acme<', '>beta<'] as $option) {
+            $this->assertStringContainsString($option, $page);
+        }
+        $this->assertStringNotContainsString('a-file', $page);
+        $this->assertStringContainsString('<option value="beta" selected>', $client->get('/_pype/logs?source=beta')->body());
+
+        $this->assertSame(['from the app'], $messages(''));
+        $this->assertSame(['from acme'], $messages('&source=acme'));
+        $this->assertSame(['from the worker'], $messages('&source=Worker'));
+
+        // Only the folders that were named: anything else is the app's own log, never a path.
+        foreach (['private', '../private', '../../storage/private', $this->base . '/storage/private', 'tenants/acme'] as $elsewhere) {
+            $this->assertSame(['from the app'], $messages('&source=' . rawurlencode($elsewhere)), $elsewhere);
+        }
+
+        // Without sources there is nothing to choose.
+        $this->assertStringNotContainsString('id="source"', (new TestClient($this->app()))->get('/_pype/logs')->body());
     }
 
     public function test_viewer_is_not_public_in_production(): void

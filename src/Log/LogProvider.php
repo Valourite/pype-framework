@@ -49,6 +49,36 @@ final class LogProvider implements Provider
         return $loggers;
     }
 
+    /**
+     * log.viewer.sources: other log folders the viewer offers beside the app's own, for an app
+     * that writes more than one log (a folder per tenant, a worker's own). Paths are relative to
+     * the app; 'label' => 'path' is one folder, and a path with * is one source per folder that
+     * matches, named after the folder:
+     *
+     *   'sources' => ['Worker' => 'storage/logs/worker', 'storage/logs/tenants/*']
+     *
+     * @return array<string, string> label => directory
+     */
+    private static function sources(Application $app): array
+    {
+        $sources = [];
+
+        foreach ((array) $app->config('log.viewer.sources', []) as $label => $path) {
+            $path = $app->path((string) $path);
+
+            if (!str_contains($path, '*')) {
+                $sources[is_string($label) ? $label : basename($path)] = $path;
+                continue;
+            }
+
+            foreach (glob($path, GLOB_ONLYDIR) ?: [] as $directory) {
+                $sources[basename($directory)] = $directory;
+            }
+        }
+
+        return $sources;
+    }
+
     public function register(Application $app): void
     {
         $container = $app->container;
@@ -66,6 +96,7 @@ final class LogProvider implements Provider
         ));
         $container->bind(LoggerInterface::class, fn ($c) => $c->get(Logger::class));
         $container->singleton(LogReader::class, fn () => new LogReader($directory));
+        $container->singleton(LogViewer::class, fn ($c) => new LogViewer($c->get(LogReader::class), self::sources($app)));
 
         $app->reportUsing(LogReporter::class);
 

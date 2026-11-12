@@ -21,7 +21,8 @@ use Pype\Routing\Urls;
  *
  * Add it to config/app.php's providers. Like the log viewer and the dev mailbox it is there in
  * debug only; outside debug it is registered only when switched on AND given stages to guard it
- * (debug.stages), since the screens show how the app is put together.
+ * (debug.stages), since the screens show how the app is put together. Outside debug that is the
+ * route screen alone: the recorder only when debug.requests.enabled says so, the sandbox never.
  *
  *   'debug' => ['enabled' => true, 'path' => '/_pype', 'stages' => [Authenticate::class, EnsureAdmin::class]]
  */
@@ -36,8 +37,14 @@ final class DebugProvider implements Provider
         }
 
         $path = rtrim((string) $app->config('debug.path', '/_pype'), '/');
-        // Not while the app's tests run (APP_ENV=testing): hundreds of requests nobody will look at.
-        $recording = (bool) $app->config('debug.requests.enabled', $app->environment() !== 'testing');
+        $debug = (bool) $app->config('app.debug');
+
+        // The recorder writes a file per request and keeps what was sent: in debug by default
+        // (not while the app's tests run: hundreds of requests nobody will look at), and outside
+        // debug only when asked for by name. The sandbox needs debug: its own process is in
+        // sandbox mode only then.
+        $recording = (bool) $app->config('debug.requests.enabled', $debug && $app->environment() !== 'testing');
+        $sandbox = $debug && (bool) $app->config('debug.sandbox.enabled', true);
 
         $app->container->singleton(RouteExplorer::class, static fn () => new RouteExplorer($app));
         $app->container->singleton(RequestLog::class, static fn () => new RequestLog(
@@ -49,14 +56,17 @@ final class DebugProvider implements Provider
             $app->router,
             $c->get(Urls::class),
             $recording ? $c->get(RequestLog::class) : null,
-            $c->get(Sandbox::class),
+            $sandbox ? $c->get(Sandbox::class) : null,
         ));
 
         $app->container->singleton(Sandbox::class, static fn () => new Sandbox(
             $app,
             $app->path((string) $app->config('debug.sandbox.dir', 'storage/debug/sandbox')),
         ));
-        $this->commands($app);
+
+        if ($sandbox) {
+            $this->commands($app);
+        }
 
         // In the sandbox's own process the one request it runs is kept where the runner reads it back.
         if ($recording && $app->config('app.sandbox')) {
@@ -68,13 +78,15 @@ final class DebugProvider implements Provider
             $app->through(new StageSpec(RecordRequest::class));
         }
 
-        $app->router->group($path, $stages, function (Router $r) use ($recording) {
+        $app->router->group($path, $stages, function (Router $r) use ($recording, $sandbox) {
             $r->get('/', [ShowDebugIndex::class, HtmlOutlet::class])->name('debug');
             $r->get('/routes', [ShowRoutes::class, HtmlOutlet::class])->name('routes');
             $r->get('/routes/show', [ShowRoute::class, HtmlOutlet::class])->name('routes.show');
 
-            $r->get('/sandbox', [ShowSandbox::class, HtmlOutlet::class])->name('sandbox');
-            $r->post('/sandbox', [SameOrigin::class, RunSandbox::class, HtmlOutlet::class])->name('sandbox.run');
+            if ($sandbox) {
+                $r->get('/sandbox', [ShowSandbox::class, HtmlOutlet::class])->name('sandbox');
+                $r->post('/sandbox', [SameOrigin::class, RunSandbox::class, HtmlOutlet::class])->name('sandbox.run');
+            }
 
             if ($recording) {
                 $r->get('/requests', [ShowRequests::class, HtmlOutlet::class])->name('requests');

@@ -839,6 +839,10 @@ problems are sent. The file is always written too, so the viewer and error page 
 **Log viewer:** open `/_pype/logs` while `APP_DEBUG=true` (and `APP_ENV` isn't production) for a live view (new entries appear
 within a second) with filters for level, request id and text. It's off in production unless you
 enable it and guard it with stages in `config/log.php` (`'stages' => ['web', 'auth', EnsureAdmin::class]`).
+An app that writes more than one log (a folder per tenant, a worker's own) can offer them all in
+the viewer with `'sources' => ['Worker' => 'storage/logs/worker', 'storage/logs/tenants/*']`: a
+picker appears, each `*` match is a source named after its folder, and only folders named there can
+be read.
 
 **Error page:** with `APP_DEBUG=true`, an unexpected error in the browser shows the exception,
 the code around each line of the trace, the route and its stages, the request (passwords,
@@ -890,6 +894,11 @@ return [
   Only what goes through pype is sandboxed: an HTTP call your own code makes, a file it writes, or
   a second database it opens by hand are real. The data is as good as your seeder. It is always
   SQLite, so migrations written as MySQL- or Postgres-only SQL can't build one.
+
+**In production**, like the log viewer, the screens exist only when `debug.enabled` is true *and*
+`debug.stages` guards them, and then it is the route screen alone: the recorder writes a file per
+request and keeps what was sent, so it runs outside debug only when `debug.requests.enabled` is set
+to true by name (switch it on to chase something, then off); the sandbox never does.
 
 Without the provider, or outside debug, none of this is loaded and nothing is timed. Tools of your
 own can use the same two hooks: `$app->observeStages(fn (string $event, $stage, $request, $value) => ...)`
