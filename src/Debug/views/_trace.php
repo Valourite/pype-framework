@@ -58,7 +58,7 @@ $total = max(0.001, (float) $record['ms']);
                 <?php foreach ($s['put'] as $class) { $undeclared = $declared !== null && !in_array($class, $declared, true) && $s['kind'] !== 'outlet'; ?>
                     <span class="tag key gives" title="<?= $h((string) $class) ?><?= $undeclared ? ' — not in its #[Provides], so routes:check does not know about it' : '' ?>">put <?= $h($short((string) $class)) ?><?= $undeclared ? ' (not declared)' : '' ?></span>
                 <?php } ?>
-                <?php if ($s['replacedRequest']) { ?><span class="tag key needs" title="It handed a copy of the request to the next stage. Stages before it, the outlets among them, still hold the original: without the route parameters and with the input as it arrived.">passed on a copy of the request</span><?php } ?>
+                <?php if ($s['replacedRequest']) { ?><span class="tag key" title="It gave the next stage a changed copy of the request (trimmed input, or the method a form asked for). Stages after it, and the outlet when it renders, get the copy. Stages before it still hold the request as it arrived: same route parameters and context, but the input and method as sent.">changed the request for the stages after it</span><?php } ?>
                 <?php if (!$s['calledNext'] && !$last) { ?><span class="tag">did not call the next stage</span><?php } ?>
             </div>
             <?php } ?>

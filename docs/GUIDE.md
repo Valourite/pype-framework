@@ -857,8 +857,9 @@ production (`APP_ENV=production` or `APP_DEBUG=false`) shows a plain error.
   stage: how long it took itself and with the stages it called, what it put in the context (marked
   when it isn't in the stage's `#[Provides]`), the response it handed back, the exception it threw,
   and the queries it ran with their time. Also: the stages that never ran because one before them
-  answered, and a stage that handed a *copy* of the request to the next (`TrimStrings`,
-  `MethodOverride`: the stages before it, outlets among them, still hold the original). Passwords,
+  answered, and a stage that changed the request for the stages after it (`TrimStrings`,
+  `MethodOverride`: they pass on a copy with the trimmed input or the overridden method; stages
+  before them keep the request as it arrived, with the same route params and context). Passwords,
   tokens, cookies and the values of queries that name a secret are not kept. The screens' own
   requests are not recorded; rendering by the outlet happens after the stages and is not timed.
 
