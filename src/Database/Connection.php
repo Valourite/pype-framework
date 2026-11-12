@@ -29,6 +29,8 @@ final class Connection
     /**
      * @param array<string, mixed> $config  one entry from config/database.php 'connections'
      */
+    private ?Closure $listener = null;
+
     public function __construct(private readonly array $config, private readonly string $basePath = '')
     {
     }
@@ -90,7 +92,32 @@ final class Connection
     /** Raw, unprepared SQL — may contain several statements (migrations, pragmas). */
     public function statement(string $sql): void
     {
-        $this->pdo()->exec($sql);
+        if ($this->listener === null) {
+            $this->pdo()->exec($sql);
+
+            return;
+        }
+
+        $pdo = $this->pdo();
+        $started = hrtime(true);
+
+        try {
+            $pdo->exec($sql);
+        } finally {
+            ($this->listener)($sql, [], (hrtime(true) - $started) / 1e6);
+        }
+    }
+
+    /**
+     * Be told about every query as it finishes (also one that failed): its SQL, its bindings and
+     * how long it took in milliseconds. For development tools (the request recorder); null, the
+     * default, switches it off and nothing is timed.
+     *
+     * @param (Closure(string $sql, array $bindings, float $ms): void)|null $listener
+     */
+    public function listen(?Closure $listener): void
+    {
+        $this->listener = $listener;
     }
 
     public function lastInsertId(): string
@@ -201,7 +228,19 @@ final class Connection
             );
         }
 
-        $statement->execute();
+        if ($this->listener === null) {
+            $statement->execute();
+
+            return $statement;
+        }
+
+        $started = hrtime(true);
+
+        try {
+            $statement->execute();
+        } finally {
+            ($this->listener)($sql, $bindings, (hrtime(true) - $started) / 1e6);
+        }
 
         return $statement;
     }

@@ -26,6 +26,9 @@ use Throwable;
  * Two optional hooks run around every stage (and the destination):
  *  - mapResult():   transforms each return value, so $next() always yields a predictable type
  *  - onException(): turns a thrown exception into a return value, so outer stages still see it
+ *
+ * observe() is for development tools (the request recorder): a callback told when each stage is
+ * entered, when it throws, and when it is left. Unset, as it is outside debug, it costs nothing.
  */
 final class Pipeline
 {
@@ -36,6 +39,7 @@ final class Pipeline
 
     private ?Closure $mapResult = null;
     private ?Closure $onException = null;
+    private ?Closure $observer = null;
 
     private readonly Invoker $invoker;
 
@@ -75,6 +79,21 @@ final class Pipeline
         return $this;
     }
 
+    /**
+     * Watch the stages run: called with ('enter', $stage, $passable, null) before a stage,
+     * ('threw', $stage, $passable, $exception) when one throws, and ('leave', $stage, $passable,
+     * $result) once it is done (after mapResult; $result is null when the exception goes on up).
+     * Stages nest, so a stage's 'leave' comes after those of every stage it called.
+     *
+     * @param (Closure(string $event, mixed $stage, mixed $passable, mixed $value): void)|null $observer
+     */
+    public function observe(?Closure $observer): self
+    {
+        $this->observer = $observer;
+
+        return $this;
+    }
+
     public function then(Closure $destination): mixed
     {
         return $this->step(0, $this->passable, $this->stages, $destination);
@@ -87,6 +106,10 @@ final class Pipeline
      */
     private function step(int $i, mixed $passable, array $stages, Closure $destination): mixed
     {
+        if ($this->observer !== null && isset($stages[$i])) {
+            return $this->observed($i, $passable, $stages, $destination);
+        }
+
         try {
             $result = isset($stages[$i])
                 ? $this->invoke($stages[$i], $passable, fn (mixed $passable) => $this->step($i + 1, $passable, $stages, $destination))
@@ -100,6 +123,35 @@ final class Pipeline
         }
 
         return $this->mapResult === null ? $result : ($this->mapResult)($result);
+    }
+
+    /** step() for a stage, telling the observer about it. Kept apart so the usual path has one check and nothing more. */
+    private function observed(int $i, mixed $passable, array $stages, Closure $destination): mixed
+    {
+        $stage = $stages[$i];
+        ($this->observer)('enter', $stage, $passable, null);
+
+        try {
+            $result = $this->invoke($stage, $passable, fn (mixed $passable) => $this->step($i + 1, $passable, $stages, $destination));
+        } catch (Throwable $e) {
+            ($this->observer)('threw', $stage, $passable, $e);
+
+            if ($this->onException === null) {
+                ($this->observer)('leave', $stage, $passable, null);
+
+                throw $e;
+            }
+
+            $result = ($this->onException)($e, $passable);
+        }
+
+        if ($this->mapResult !== null) {
+            $result = ($this->mapResult)($result);
+        }
+
+        ($this->observer)('leave', $stage, $passable, $result);
+
+        return $result;
     }
 
     /** Run the pipeline; whatever falls out the far end is returned. */

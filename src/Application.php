@@ -53,6 +53,8 @@ final class Application
     /** @var list<class-string<Reporter>|Reporter|Closure> */
     private array $reporters = [];
 
+    private ?Closure $stageObserver = null;
+
     /** @var list<array{0: class-string<Throwable>, 1: Closure}> */
     private array $renderers = [];
 
@@ -68,7 +70,7 @@ final class Application
         public readonly string $basePath,
         array $config = [],
     ) {
-        $this->config = self::safeDebug($config);
+        $this->config = self::sandboxed(self::safeDebug($config));
         $this->container = new Container();
         $this->router = new Router();
 
@@ -126,6 +128,39 @@ final class Application
         return $config;
     }
 
+    /**
+     * Sandbox mode, for the whole process: with PYPE_SANDBOX=<an SQLite file> in the environment
+     * and app.debug on, the app runs against that file and nothing it does leaves the process:
+     * mail, queue, cache, sessions and rate limits use their in-memory drivers. The development
+     * sandbox (/_pype/sandbox) starts `bin/pype` this way to build its database and to run a
+     * request against a copy. Outside debug the variable is ignored.
+     *
+     * @param array<string, mixed> $config
+     * @return array<string, mixed>
+     */
+    private static function sandboxed(array $config): array
+    {
+        $file = (string) (Env::get('PYPE_SANDBOX') ?? '');
+
+        if ($file === '' || !$config['app']['debug']) {
+            return $config;
+        }
+
+        $config['app']['sandbox'] = $file;
+        $config['database'] = [
+            ...(array) ($config['database'] ?? []),
+            'default' => 'sandbox',
+            'connections' => ['sandbox' => ['driver' => 'sqlite', 'database' => $file]],
+            'rate_limits' => ['driver' => 'array'] + (array) ($config['database']['rate_limits'] ?? []),
+        ];
+
+        foreach (['mail', 'queue', 'cache', 'session'] as $part) {
+            $config[$part] = ['driver' => 'array'] + (array) ($config[$part] ?? []);
+        }
+
+        return $config;
+    }
+
     private static function isProductionName(string $env): bool
     {
         return in_array(strtolower($env), ['production', 'prod'], true);
@@ -177,6 +212,19 @@ final class Application
     public function through(string|object ...$stages): self
     {
         array_push($this->globalStages, ...$stages);
+
+        return $this;
+    }
+
+    /**
+     * Watch every stage of every request run (see Pipeline::observe). For development tools:
+     * the request recorder sets it in debug. Null, the default, switches it off.
+     *
+     * @param (Closure(string $event, mixed $stage, mixed $passable, mixed $value): void)|null $observer
+     */
+    public function observeStages(?Closure $observer): self
+    {
+        $this->stageObserver = $observer;
 
         return $this;
     }
@@ -424,7 +472,8 @@ final class Application
     {
         return (new Pipeline($this->container))
             ->mapResult(Response::from(...))
-            ->onException(fn (Throwable $e, Request $request) => $this->renderException($e, $request));
+            ->onException(fn (Throwable $e, Request $request) => $this->renderException($e, $request))
+            ->observe($this->stageObserver);
     }
 
     private function resolveOutlet(string|Outlet $outlet): Outlet

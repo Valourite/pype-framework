@@ -25,8 +25,8 @@ use Throwable;
  */
 final class ErrorPage extends Outlet
 {
-    private const SECRET_HEADERS = ['authorization', 'cookie', 'set-cookie', 'x-api-key', 'proxy-authorization'];
-    private const SECRET_FIELDS = '/pass|token|secret|key|card|cvv|cvc|pin|signature/i';
+    public const SECRET_HEADERS = ['authorization', 'cookie', 'set-cookie', 'x-api-key', 'proxy-authorization'];
+    public const SECRET_FIELDS = '/pass|token|secret|key|card|cvv|cvc|pin|signature/i';
 
     public function __construct(private readonly Throwable $exception, private readonly Application $app)
     {
@@ -43,7 +43,7 @@ final class ErrorPage extends Outlet
                 'method' => $request->method(),
                 'path' => $request->path(),
                 'query' => $request->query(),
-                'input' => self::redact($request->method() === 'GET' ? [] : (array) $request->input()),
+                'input' => Redact::fields($request->method() === 'GET' ? [] : (array) $request->input()),
                 'headers' => self::headers($request),
                 'cookies' => array_keys($request->cookies()),
                 'ip' => $request->ip(),
@@ -120,19 +120,6 @@ final class ErrorPage extends Outlet
         ksort($out);
 
         return $out;
-    }
-
-    private static function redact(array $data): array
-    {
-        foreach ($data as $key => $value) {
-            if (is_array($value)) {
-                $data[$key] = self::redact($value);
-            } elseif (is_string($key) && preg_match(self::SECRET_FIELDS, $key)) {
-                $data[$key] = '•••• hidden';
-            }
-        }
-
-        return $data;
     }
 
     /** @return list<array> the log lines this request wrote (empty when logging isn't set up) */

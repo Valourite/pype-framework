@@ -75,7 +75,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 | `src/Log/` | `Logger` (PSR-3, JSON lines), `LogReader`, `LogRequests`, `LogReporter`, `LogViewer` + `views/viewer.php`, `LogProvider` |
 | `src/Security/` | `Encrypter` (libsodium) |
 | `src/Mail/` | `Message`, `Mail`, `Mailer`, `Transport` + PHPMailer/log/array/null transports, `MailProvider` |
-| `src/Debug/` | `ErrorPage` (dev error page outlet) + `views/error.php` |
+| `src/Debug/` | `ErrorPage` (dev error page outlet) + `views/error.php`; `DebugProvider` (opt-in): `RouteExplorer` (/_pype/routes), `Recorder` + `Trace` + `RequestLog` (/_pype/requests, on `Pipeline::observe()` and `Connection::listen()`), `Sandbox` + `SandboxRun` + `TableDiff` (/_pype/sandbox: `bin/pype sandbox:build|run|reset` in a process of its own, `PYPE_SANDBOX` → `Application::sandboxed()`), `SameOrigin`, `DebugPages` + `views/` (`_head.php` is their shared top), `Redact` |
 | `src/Server/` | `SwooleServer` (OpenSwoole adapter, `APP_SERVER=swoole`) |
 | `src/Console/` | `bin/pype` commands and `make:*` stubs |
 | `src/Testing/` | `TestClient` (in-process requests with a cookie jar), `TestResponse` |

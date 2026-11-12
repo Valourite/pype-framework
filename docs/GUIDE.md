@@ -845,6 +845,55 @@ the code around each line of the trace, the route and its stages, the request (p
 tokens and cookies hidden), and the log lines from that request. API clients still get JSON, and
 production (`APP_ENV=production` or `APP_DEBUG=false`) shows a plain error.
 
+**Route screen and request recorder:** add `Pype\Debug\DebugProvider::class` to the providers in
+`config/app.php` and, in debug, `/_pype` links every development screen:
+
+- **`/_pype/routes`**: every route, with a filter. Click one to see it taken apart: the global
+  stages and the route's own in the order they run, the outlets that wrap them, which stack each
+  came from, the arguments given with `::with()`, the file and line, and what each stage
+  `#[Requires]` and `#[Provides]`, with the stage that provides what a later one needs. What
+  `routes:check` would say about the route is shown in place.
+- **`/_pype/requests`**: what each request did (the newest 100, in `storage/debug/requests`). Per
+  stage: how long it took itself and with the stages it called, what it put in the context (marked
+  when it isn't in the stage's `#[Provides]`), the response it handed back, the exception it threw,
+  and the queries it ran with their time. Also: the stages that never ran because one before them
+  answered, and a stage that handed a *copy* of the request to the next (`TrimStrings`,
+  `MethodOverride`: the stages before it, outlets among them, still hold the original). Passwords,
+  tokens, cookies and the values of queries that name a secret are not kept. The screens' own
+  requests are not recorded; rendering by the outlet happens after the stages and is not timed.
+
+```php
+// config/debug.php (all optional)
+return [
+    'enabled' => env('APP_DEBUG', false),   // the screens; like the log viewer, never in production
+    'path' => '/_pype',
+    'stages' => [],                         // outside debug: only with stages that guard them
+    'requests' => ['enabled' => true, 'keep' => 100, 'dir' => 'storage/debug/requests'],
+    'sandbox' => ['seeder' => 'DatabaseSeeder', 'dir' => 'storage/debug/sandbox'],   // 'php' => '/usr/bin/php' under PHP-FPM if `php` isn't on its PATH
+];
+```
+
+- **`/_pype/sandbox`**: send a request into a throw-away database and see what it did. `php bin/pype
+  sandbox:build` (or the button) runs your migrations into a new SQLite file and then your seeder
+  (`Database\Seeders\DatabaseSeeder`, or `debug.sandbox.seeder`); the screen says when the
+  migrations have changed since. Pick a method and a path (a route's page has "try it in the
+  sandbox"; `{id}` offers real ids from the matching table), type the body as `field=value` lines
+  or JSON, choose who to send it as, and run. You get the response, the stages as on
+  `/_pype/requests`, **the rows that were added, changed (column by column) and deleted**, the mail
+  it sent and the jobs it queued. Each run starts from a fresh copy; tick "carry on from the last
+  run" to create, then edit, then delete.
+
+  It runs in a process of its own (`bin/pype sandbox:run`, started with `PYPE_SANDBOX=<file>`):
+  in debug that variable makes the whole process use that SQLite file, with mail, queue, cache,
+  sessions and rate limits in memory, so your real database is never opened and nothing is sent.
+  Only what goes through pype is sandboxed: an HTTP call your own code makes, a file it writes, or
+  a second database it opens by hand are real. The data is as good as your seeder. It is always
+  SQLite, so migrations written as MySQL- or Postgres-only SQL can't build one.
+
+Without the provider, or outside debug, none of this is loaded and nothing is timed. Tools of your
+own can use the same two hooks: `$app->observeStages(fn (string $event, $stage, $request, $value) => ...)`
+(`enter`, `threw`, `leave` for every stage) and `$connection->listen(fn (string $sql, array $bindings, float $ms) => ...)`.
+
 **Your API's error wording:** pype's own errors (no route, malformed JSON, failed validation,
 unauthenticated, a 500...) can be reworded in `config/app.php` `errors` without touching the
 JSON shape, and `Validate::with($rules, status: 400)` changes a validation failure's status

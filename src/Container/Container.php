@@ -58,6 +58,12 @@ final class Container implements ContainerInterface
         unset($this->instances[$id]);
     }
 
+    /** Whether the app bound $id (bind, singleton or instance): unlike has(), a class that could merely be autowired doesn't count. */
+    public function bound(string $id): bool
+    {
+        return isset($this->instances[$id]) || isset($this->bindings[$id]);
+    }
+
     public function has(string $id): bool
     {
         return isset($this->instances[$id]) || isset($this->bindings[$id]) || class_exists($id);

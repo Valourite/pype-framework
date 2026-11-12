@@ -6,6 +6,7 @@ namespace Pype\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use Pype\Application;
+use Pype\Debug\DebugProvider;
 use Pype\Http\Request;
 use Pype\Http\Response;
 use Pype\Log\LogProvider;
@@ -25,7 +26,7 @@ final class ProductionSafetyTest extends TestCase
 {
     public const SECRET = 'db password is hunter2';
     public const TEMPLATE_SECRET = 'template failed reading /srv/app/.env';
-    private const DEV_PAGES = ['/_pype/logs', '/_pype/logs/entries', '/_pype/mail'];
+    private const DEV_PAGES = ['/_pype/logs', '/_pype/logs/entries', '/_pype/mail', '/_pype', '/_pype/routes', '/_pype/routes/show?m=GET&p=/boom', '/_pype/requests', '/_pype/requests/show?id=x', '/_pype/sandbox'];
 
     private string $base;
 
@@ -51,8 +52,9 @@ final class ProductionSafetyTest extends TestCase
             'app' => $app,
             'log' => ['requests' => true, 'viewer' => ['enabled' => true]],
             'mail' => ['driver' => 'log', 'mailbox' => ['enabled' => true]],
+            'debug' => ['enabled' => true],
         ]);
-        $application->register(LogProvider::class)->register(MailProvider::class);
+        $application->register(LogProvider::class)->register(MailProvider::class)->register(DebugProvider::class);
         $application->router->get('/boom', fn () => throw new RuntimeException(self::SECRET));
         $application->router->get('/bad-view', [FailingOutlet::class, fn () => ['ok' => true]]);
 

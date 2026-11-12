@@ -67,6 +67,12 @@ final class Router
         $this->stacks[$name] = $stages;
     }
 
+    /** @return array<string, list<string|object>> every named stack and the stages it stands for */
+    public function stacks(): array
+    {
+        return $this->stacks;
+    }
+
     /**
      * Expand stack names and move outlets to the front, keeping their relative order.
      *
