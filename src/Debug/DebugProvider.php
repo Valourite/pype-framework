@@ -36,7 +36,8 @@ final class DebugProvider implements Provider
         }
 
         $path = rtrim((string) $app->config('debug.path', '/_pype'), '/');
-        $recording = (bool) $app->config('debug.requests.enabled', true);
+        // Not while the app's tests run (APP_ENV=testing): hundreds of requests nobody will look at.
+        $recording = (bool) $app->config('debug.requests.enabled', $app->environment() !== 'testing');
 
         $app->container->singleton(RouteExplorer::class, static fn () => new RouteExplorer($app));
         $app->container->singleton(RequestLog::class, static fn () => new RequestLog(

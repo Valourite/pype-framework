@@ -868,7 +868,7 @@ return [
     'enabled' => env('APP_DEBUG', false),   // the screens; like the log viewer, never in production
     'path' => '/_pype',
     'stages' => [],                         // outside debug: only with stages that guard them
-    'requests' => ['enabled' => true, 'keep' => 100, 'dir' => 'storage/debug/requests'],
+    'requests' => ['enabled' => true, 'keep' => 100, 'dir' => 'storage/debug/requests'],   // off by default while APP_ENV=testing
     'sandbox' => ['seeder' => 'DatabaseSeeder', 'dir' => 'storage/debug/sandbox'],   // 'php' => '/usr/bin/php' under PHP-FPM if `php` isn't on its PATH
 ];
 ```

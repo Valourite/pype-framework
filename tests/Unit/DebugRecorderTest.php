@@ -297,6 +297,15 @@ final class DebugRecorderTest extends TestCase
         $this->assertStringNotContainsString('Requests', $client->get('/_pype')->body());
         $this->assertDirectoryDoesNotExist($this->base . '/storage/debug');
 
+        // While the app's own tests run, nothing is recorded unless asked for.
+        $testing = new Application($this->base, ['app' => ['env' => 'testing', 'debug' => true]]);
+        $testing->register(DebugProvider::class);
+        $testing->router->get('/hi', fn () => 'hi');
+        (new TestClient($testing))->get('/hi');
+        $this->assertSame(200, (new TestClient($testing))->get('/_pype/routes')->status());
+        $this->assertSame(404, (new TestClient($testing))->get('/_pype/requests')->status());
+        $this->assertDirectoryDoesNotExist($this->base . '/storage/debug');
+
         // An app with no database bound records without one.
         $bare = new Application($this->base, ['app' => ['env' => 'local', 'debug' => true]]);
         $bare->register(DebugProvider::class);
