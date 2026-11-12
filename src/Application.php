@@ -394,7 +394,17 @@ final class Application
         $response = $this->pipeline()
             ->send($request)
             ->through($this->router->compile($this->globalStages))
-            ->then(fn (Request $request) => $this->dispatch($request));
+            ->then(function (Request $reached) use (&$request): Response {
+                // A global stage may have handed on a copy (trimmed input, the overridden method):
+                // that is the request the route got, so it is the one outlets render with and the
+                // one services asking the container for "the request" should see.
+                if ($reached !== $request) {
+                    $request = $reached;
+                    $this->container->instance(Request::class, $reached);
+                }
+
+                return $this->dispatch($reached);
+            });
 
         // No route/group/global outlet claimed it (or the route was never reached): use the default.
         if ($response->outlet() === null) {

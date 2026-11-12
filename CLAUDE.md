@@ -60,7 +60,7 @@ Read `docs/ARCHITECTURE.md` before changing core behaviour, `docs/ROADMAP.md` fo
 | `src/Application.php` | lifecycle: config, providers, global stages, `handle()`, error rendering |
 | `src/Pipeline/` | `Stage` interface, `Pipeline`, `Invoker` (fills closure/invokable params by type and name) |
 | `src/Routing/` | `Router` (groups, named stacks, outlet hoisting in `compile()`, fast matching + `optimize` cache), `Route` |
-| `src/Http/` | `Request`, `Response`, `Context`, `Cookie`, `UploadedFile`, `Responsable`, `ForwardedClient` |
+| `src/Http/` | `Request` (route params live in its shared `Context`, so every copy of a request has them), `Response`, `Context`, `Cookie`, `UploadedFile`, `Responsable`, `ForwardedClient` |
 | `src/Outlet/` | `Outlet` (abstract stage), `JsonOutlet`, `FileOutlet` |
 | `src/View/` | plain-PHP templates: `View`, `ViewOutlet` (class-based views), `Template`, `Views` |
 | `src/Validation/` | `Validator` (rules), `Validate` stage, `ValidatedInput` |

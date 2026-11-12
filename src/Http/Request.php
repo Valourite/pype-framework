@@ -15,9 +15,6 @@ final class Request
 {
     private readonly Context $context;
 
-    /** @var array<string, string> */
-    private array $params = [];
-
     /**
      * @param array<string, mixed>  $query
      * @param array<string, mixed>  $body
@@ -180,23 +177,21 @@ final class Request
         return $this->method;
     }
 
-    /** A copy with another HTTP method. It shares this request's context, params and input. */
     /**
      * The same request with other body and/or query input (e.g. TrimStrings). It shares this
-     * request's context and route params, so what earlier stages put there stays.
+     * request's context and route params (also ones set later: the route is matched after the
+     * global stages have run), so every copy of a request sees the same of both.
      *
      * @param array<string, mixed>|null $body
      * @param array<string, mixed>|null $query
      */
     public function withInput(?array $body = null, ?array $query = null): self
     {
-        $clone = new self($this->method, $this->path, $query ?? $this->query, $body ?? $this->body, $this->headers,
+        return new self($this->method, $this->path, $query ?? $this->query, $body ?? $this->body, $this->headers,
             $this->rawBody, $this->ip, $this->cookies, $this->files, $this->context, $this->secure);
-        $clone->params = $this->params;
-
-        return $clone;
     }
 
+    /** A copy with another HTTP method (MethodOverride). It shares this request's context, route params and input. */
     public function withMethod(string $method): self
     {
         $clone = clone $this;
@@ -317,19 +312,19 @@ final class Request
     /** Route parameter, e.g. {id} in /users/{id}. */
     public function param(string $key, ?string $default = null): ?string
     {
-        return $this->params[$key] ?? $default;
+        return $this->context->routeParams()[$key] ?? $default;
     }
 
     /** @return array<string, string> */
     public function params(): array
     {
-        return $this->params;
+        return $this->context->routeParams();
     }
 
     /** @param array<string, string> $params */
     public function setParams(array $params): void
     {
-        $this->params = $params;
+        $this->context->setRouteParams($params);
     }
 
     /** Typed store for passing data between stages. */

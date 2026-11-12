@@ -25,6 +25,33 @@ final class Context
     private array $items = [];
 
     /**
+     * The matched route's {params}. Kept here, not on the Request, because a stage may hand a copy
+     * of the request to the next one (TrimStrings, MethodOverride) and the route is matched after
+     * the global stages: every copy shares this context, so every copy has the params.
+     *
+     * @var array<string, string>
+     */
+    private array $routeParams = [];
+
+    /**
+     * @internal read them with $request->param('id') / $request->params()
+     * @return array<string, string>
+     */
+    public function routeParams(): array
+    {
+        return $this->routeParams;
+    }
+
+    /**
+     * @internal set with $request->setParams()
+     * @param array<string, string> $params
+     */
+    public function setRouteParams(array $params): void
+    {
+        $this->routeParams = $params;
+    }
+
+    /**
      * @template T of object
      * @param T $value
      * @param class-string<T>|null $as  store under an interface/parent instead of the concrete class
